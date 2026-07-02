@@ -113,3 +113,31 @@ Visit the interactive Swagger UI documentation at: `http://127.0.0.1:8000/api/v1
 - **Domain-Driven Directory Structure**: Business domains are separated into self-contained modules under `app/modules/` (e.g., `auth`, `tenant`, `documents`).
 - **Timezone Standardization**: All timestamps are standardized to UTC and configured as timezone-aware (`TIMESTAMPTZ`) to ensure consistency across systems.
 
+---
+
+## 4. PEP 8 Linting & Formatting
+
+We use **Ruff** for extremely fast PEP 8 code linting and formatting.
+
+### 4.1 Running inside Docker (Recommended)
+Since Ruff is installed in the container's virtual environment, you can run it directly:
+
+```bash
+# 1. Format code layout and spacing (PEP 8)
+docker compose exec api ruff format --no-cache app tests
+
+# 2. Sort imports and fix basic lint issues
+docker compose exec api ruff check --select I --fix --no-cache app tests
+```
+
+### 4.2 Running locally (Without Docker)
+If you are developing locally with `uv`:
+
+```bash
+# 1. Format code layout
+uv run ruff format app tests
+
+# 2. Sort imports and lint
+uv run ruff check --select I --fix app tests
+```
+

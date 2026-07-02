@@ -1,15 +1,30 @@
-import pytest_asyncio
 from typing import AsyncGenerator
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
+
 from app.core.config import settings
+from app.core.database import get_db
+from app.main import app
 
 # Create a test-specific engine using NullPool to prevent connection caching
 # across different asyncio event loops during test execution.
-test_engine = create_async_engine(
-    settings.DATABASE_URL,
-    poolclass=NullPool
-)
+test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_database() -> None:
+    """Automatically truncates all tables before each test to guarantee database freshness."""
+    async with test_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE document_chunks, documents, audit_logs, workspaces, users, tenants CASCADE;"
+            )
+        )
+
 
 @pytest_asyncio.fixture
 async def db() -> AsyncGenerator[AsyncSession, None]:
@@ -17,3 +32,20 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
         await session.rollback()
+
+
+@pytest_asyncio.fixture
+async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Yields an HTTPX AsyncClient with overridden db session dependency."""
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()

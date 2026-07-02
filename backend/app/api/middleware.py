@@ -1,29 +1,32 @@
-import jwt
 from uuid import UUID
+
+import jwt
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.core.config import settings
-from app.core.tenant_context import set_current_tenant_id, reset_current_tenant_id
+from app.core.tenant_context import reset_current_tenant_id, set_current_tenant_id
+
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
     Middleware that intercepts all HTTP requests and inspects headers or JWT tokens
-    to resolve the request's active tenant. The resolved tenant ID is bound to 
+    to resolve the request's active tenant. The resolved tenant ID is bound to
     the request-scoped contextvar to enforce logical data isolation.
     """
+
     async def dispatch(self, request: Request, call_next) -> Response:
         tenant_id = None
-        
+
         # 1. Attempt extraction from custom test/service-to-service header
         tenant_header = request.headers.get("X-Tenant-ID")
         if tenant_header:
             try:
                 tenant_id = UUID(tenant_header)
             except ValueError:
-                pass # Invalid UUID format
-                
+                pass  # Invalid UUID format
+
         # 2. Attempt extraction from JWT Authorization header
         if not tenant_id:
             auth_header = request.headers.get("Authorization")
@@ -33,9 +36,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 token = parts[1] if len(parts) > 1 else auth_header[7:]
                 try:
                     payload = jwt.decode(
-                        token,
-                        settings.JWT_SECRET,
-                        algorithms=[settings.JWT_ALGORITHM]
+                        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
                     )
                     tenant_id_str = payload.get("tenant_id")
                     if tenant_id_str:

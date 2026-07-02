@@ -1,11 +1,13 @@
 import uuid
+
 import pytest
-from sqlalchemy import select, update, delete
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.tenant_context import set_current_tenant_id, reset_current_tenant_id
-from app.modules.tenant.models import Tenant
+from app.core.tenant_context import reset_current_tenant_id, set_current_tenant_id
 from app.modules.documents.models import Workspace
+from app.modules.tenant.models import Tenant
+
 
 @pytest.mark.asyncio
 async def test_tenant_query_isolation(db: AsyncSession):
@@ -34,7 +36,7 @@ async def test_tenant_query_isolation(db: AsyncSession):
         stmt = select(Workspace)
         result = await db.execute(stmt)
         workspaces = result.scalars().all()
-        
+
         # Should ONLY return Workspace A
         assert len(workspaces) == 1
         assert workspaces[0].name == "Workspace A"
@@ -48,7 +50,7 @@ async def test_tenant_query_isolation(db: AsyncSession):
         stmt = select(Workspace)
         result = await db.execute(stmt)
         workspaces = result.scalars().all()
-        
+
         # Should ONLY return Workspace B
         assert len(workspaces) == 1
         assert workspaces[0].name == "Workspace B"
@@ -62,13 +64,14 @@ async def test_tenant_query_isolation(db: AsyncSession):
         stmt = select(Workspace).execution_options(skip_tenant_filter=True)
         result = await db.execute(stmt)
         workspaces = result.scalars().all()
-        
+
         # Should return both workspaces
         names = [w.name for w in workspaces]
         assert "Workspace A" in names
         assert "Workspace B" in names
     finally:
         reset_current_tenant_id(token)
+
 
 @pytest.mark.asyncio
 async def test_tenant_update_delete_isolation(db: AsyncSession):
@@ -87,7 +90,11 @@ async def test_tenant_update_delete_isolation(db: AsyncSession):
     # Attempt to update Workspace A under Tenant B context
     token_b = set_current_tenant_id(tenant_b.id)
     try:
-        stmt = update(Workspace).where(Workspace.id == workspace_a.id).values(name="Hacked")
+        stmt = (
+            update(Workspace)
+            .where(Workspace.id == workspace_a.id)
+            .values(name="Hacked")
+        )
         result = await db.execute(stmt)
         await db.commit()
         # Since the filter is appended (tenant_id == tenant_b.id), no rows should be updated!

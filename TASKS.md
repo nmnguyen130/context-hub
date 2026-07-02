@@ -21,10 +21,10 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 - [x] Configure Async SQLAlchemy engine with thread-safe `tenant_id` context propagation.
 - [x] Write integration test ensuring two users from different tenants cannot read/write each other's data.
 
-### [ ] Task 1.3: Authentication & Logical Scope Middleware
-- [ ] Implement JWT-based registration and login flows inside FastAPI (with `tenant_id` claims).
+### [/] Task 1.3: Authentication & Logical Scope Middleware
+- [x] Implement JWT-based registration and login flows inside FastAPI (with `tenant_id` claims).
 - [ ] Write Next.js middleware checking tokens, handling redirect loops, and saving session state in client-side secure HTTPOnly cookies.
-- [ ] Implement FastAPI dependency injection helpers: `get_current_user`, `get_current_tenant`.
+- [x] Implement FastAPI dependency injection helpers: `get_current_user`, `get_current_tenant`.
 
 ### [ ] Task 1.4: Base Ingestion & Object Storage
 - [ ] Set up file upload API in FastAPI. Store raw payloads in S3/MinIO using structured paths: `s3://contexthub/<tenant_id>/<workspace_id>/<doc_id>.<ext>`.
