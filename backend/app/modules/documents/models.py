@@ -39,6 +39,9 @@ class Document(TenantBaseModel):
         String(50), default="PENDING"
     )  # PENDING, PARSING, ACTIVE, ERROR
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),

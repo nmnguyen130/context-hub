@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "ContextHub"
     ALLOWED_ORIGINS: str = Field(default="*")
 
+    # S3 / MinIO Configuration
+    S3_ENDPOINT_URL: str | None = Field(default=None)
+    S3_ACCESS_KEY: str | None = Field(default=None)
+    S3_SECRET_KEY: str | None = Field(default=None)
+    S3_BUCKET_NAME: str = Field(default="contexthub")
+    S3_REGION_NAME: str | None = Field(default=None)
+    S3_SECURE: bool = Field(default=True)
+
     @model_validator(mode="after")
     def assemble_urls(self) -> "Settings":
         if self.DATABASE_URL is None:

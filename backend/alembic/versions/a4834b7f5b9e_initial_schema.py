@@ -1,8 +1,8 @@
 """Initial schema
 
-Revision ID: 48a9f8cfb83c
+Revision ID: a4834b7f5b9e
 Revises: None
-Create Date: 2026-07-02 09:40:11.034237
+Create Date: 2026-07-02 10:16:01.353032
 
 """
 # ruff: noqa: F401
@@ -16,7 +16,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '48a9f8cfb83c'
+revision: str = 'a4834b7f5b9e'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -88,6 +88,9 @@ def upgrade() -> None:
     sa.Column('object_store_key', sa.String(length=512), nullable=False),
     sa.Column('status', sa.String(length=50), nullable=False),
     sa.Column('file_size', sa.Integer(), nullable=False),
+    sa.Column('mime_type', sa.String(length=100), nullable=True),
+    sa.Column('checksum', sa.String(length=64), nullable=True),
+    sa.Column('error_message', sa.String(length=255), nullable=True),
     sa.Column('workspace_id', sa.UUID(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('tenant_id', sa.UUID(), nullable=False),
@@ -96,6 +99,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('documents', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_documents_checksum'), ['checksum'], unique=False)
         batch_op.create_index(batch_op.f('ix_documents_tenant_id'), ['tenant_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_documents_workspace_id'), ['workspace_id'], unique=False)
 
@@ -129,6 +133,7 @@ def downgrade() -> None:
     with op.batch_alter_table('documents', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_documents_workspace_id'))
         batch_op.drop_index(batch_op.f('ix_documents_tenant_id'))
+        batch_op.drop_index(batch_op.f('ix_documents_checksum'))
 
     op.drop_table('documents')
     with op.batch_alter_table('audit_logs', schema=None) as batch_op:

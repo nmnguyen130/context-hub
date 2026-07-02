@@ -17,6 +17,10 @@ dependencies = [
     "redis>=5.3.0",
     "celery>=5.6.3",
     "pgvector>=0.4.2",
+    "boto3>=1.43.37",
+    "pymupdf>=1.28.0",
+    "pymupdf4llm>=1.28.0",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

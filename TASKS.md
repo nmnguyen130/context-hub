@@ -26,11 +26,11 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 - [ ] Write Next.js middleware checking tokens, handling redirect loops, and saving session state in client-side secure HTTPOnly cookies.
 - [x] Implement FastAPI dependency injection helpers: `get_current_user`, `get_current_tenant`.
 
-### [ ] Task 1.4: Base Ingestion & Object Storage
-- [ ] Set up file upload API in FastAPI. Store raw payloads in S3/MinIO using structured paths: `s3://contexthub/<tenant_id>/<workspace_id>/<doc_id>.<ext>`.
-- [ ] Setup Celery worker system with Redis as the message broker.
-- [ ] Implement a basic document parser worker that extracts plain text from `.txt`, `.md`, and `.pdf` files.
-- [ ] Implement database status updates (`PENDING` -> `PARSING` -> `ACTIVE` or `ERROR`).
+### [x] Task 1.4: Base Ingestion & Object Storage
+- [x] Set up file upload API in FastAPI. Store raw payloads in S3/MinIO using structured paths: `s3://contexthub/<tenant_id>/<workspace_id>/<doc_id>/raw.<ext>`.
+- [x] Setup Celery worker system with Redis as the message broker.
+- [x] Implement a basic document parser worker that extracts plain text from `.txt`, `.md`, and `.pdf` files.
+- [x] Implement database status updates (`PENDING` -> `PARSING` -> `ACTIVE` or `ERROR`).
 
 ---
 
