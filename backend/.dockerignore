@@ -1,0 +1,31 @@
+# Version control
+.git
+.gitignore
+.dockerignore
+
+# Docker configuration files
+Dockerfile
+docker-compose*.yml
+
+# Local development configurations & secrets
+.env
+.env.*
+! .env.example
+
+# IDEs & Editor configurations
+.vscode/
+.idea/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+
+# Python environment
+.venv/
+
+# Testing, linting & cache directories
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
