@@ -1,7 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
 
-import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -95,9 +94,10 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
     # Check Redis connection
     try:
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        from app.core.redis import get_redis_client
+
+        redis_client = get_redis_client()
         await redis_client.ping()
-        await redis_client.close()
         redis_ok = True
     except Exception:
         pass

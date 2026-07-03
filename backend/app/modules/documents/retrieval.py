@@ -1,5 +1,4 @@
 import logging
-import unicodedata
 import uuid
 
 import httpx
@@ -8,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clients import GeminiEmbeddingClient
 from app.core.config import settings
+from app.core.text_utils import normalize_text
 from app.modules.documents.models import DocumentChunk
 from app.modules.documents.rerankers import get_reranker
 
@@ -29,7 +29,7 @@ async def retrieve_grounding_chunks(
         return []
 
     # Unicode NFC Normalization for Vietnamese query compatibility
-    normalized_query = unicodedata.normalize("NFC", query)
+    normalized_query = normalize_text(query)
 
     # 1. Dense Vector Search (skip embedding retrieval if query_vector is precomputed)
     if query_vector is None:
@@ -63,8 +63,12 @@ async def retrieve_grounding_chunks(
         .order_by(func.ts_rank_cd(DocumentChunk.search_vector, sparse_query).desc())
         .limit(settings.RAG_LIMIT_SPARSE)
     )
-    sparse_res = await db.execute(sparse_stmt)
-    sparse_results = list(sparse_res.scalars().all())
+    try:
+        sparse_res = await db.execute(sparse_stmt)
+        sparse_results = list(sparse_res.scalars().all())
+    except Exception as fts_err:
+        logger.warning(f"FTS query failed (likely query formatting): {fts_err}")
+        sparse_results = []
 
     # 3. Reciprocal Rank Fusion (RRF) with constant k=60
     k_rrf = 60

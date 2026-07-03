@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-import unicodedata
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.clients import GeminiChatClient, GeminiEmbeddingClient
 from app.core.database import get_db
+from app.core.text_utils import normalize_text
 from app.modules.auth.models import User
 from app.modules.documents.models import Workspace
 from app.modules.documents.retrieval import retrieve_grounding_chunks
@@ -47,7 +47,7 @@ async def chat_stream(
         )
 
     # 2. Normalize query to Unicode NFC
-    normalized_query = unicodedata.normalize("NFC", request.query)
+    normalized_query = normalize_text(request.query)
 
     async def event_generator():
         try:
@@ -131,23 +131,23 @@ async def chat_stream(
                     full_answer += text_chunk
                     yield f"data: {json.dumps({'type': 'text', 'content': text_chunk})}\n\n"
 
-            # 10. Extract citations and emit citation payload
-            citation_uuids = re.findall(
-                r"\[\^\[([a-f0-9\-]{36})\]\]", full_answer, re.IGNORECASE
-            )
-            unique_uuids = list(dict.fromkeys(citation_uuids))
-            citations_dict = {c["chunk_id"]: c for c in citations_map}
-            active_citations = []
-            for uid in unique_uuids:
-                match = citations_dict.get(uid)
-                if match:
-                    active_citations.append(match)
+                # 10. Extract citations and emit citation payload
+                citation_uuids = re.findall(
+                    r"\[\^\[([a-f0-9\-]{36})\]\]", full_answer, re.IGNORECASE
+                )
+                unique_uuids = list(dict.fromkeys(citation_uuids))
+                citations_dict = {c["chunk_id"]: c for c in citations_map}
+                active_citations = []
+                for uid in unique_uuids:
+                    match = citations_dict.get(uid)
+                    if match:
+                        active_citations.append(match)
 
-            yield f"data: {json.dumps({'type': 'citations', 'data': active_citations})}\n\n"
-            yield 'data: {"type": "done"}\n\n'
+                yield f"data: {json.dumps({'type': 'citations', 'data': active_citations})}\n\n"
+                yield 'data: {"type": "done"}\n\n'
 
-            # 11. Write back to Redis Semantic Cache
-            await cache_manager.set(normalized_query, query_vector, full_answer)
+                # 11. Write back to Redis Semantic Cache
+                await cache_manager.set(normalized_query, query_vector, full_answer)
 
         except Exception as err:
             logger.error(f"Error in grounded chat stream: {str(err)}", exc_info=True)

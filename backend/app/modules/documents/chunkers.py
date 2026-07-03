@@ -1,5 +1,6 @@
 import re
-import unicodedata
+
+from app.core.text_utils import normalize_text
 
 # PII Scanners for Data Loss Prevention (DLP)
 PII_PATTERNS = {
@@ -54,7 +55,7 @@ class MarkdownStructureChunker:
             return []
 
         # 1. Normalize text to Unicode NFC to ensure consistent Vietnamese accent matching
-        normalized_text = unicodedata.normalize("NFC", text)
+        normalized_text = normalize_text(text)
 
         def _process_chunk_text(chunk_content: str) -> str:
             if self.dlp_action == "REJECT" and has_pii(chunk_content):

@@ -34,6 +34,10 @@ class GeminiEmbeddingClient(BaseAPIClient):
         super().__init__(client)
         self.api_key = settings.GEMINI_API_KEY
         self.model = settings.RAG_EMBEDDING_MODEL
+        # Dynamic dimension resolved from database model definition
+        from app.modules.documents.models import DocumentChunk
+
+        self.output_dim = DocumentChunk.embedding.type.dim
 
     async def get_embedding(self, text: str) -> list[float]:
         if not self.api_key:
@@ -42,8 +46,8 @@ class GeminiEmbeddingClient(BaseAPIClient):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:embedContent?key={self.api_key}"
         payload = {
             "content": {"parts": [{"text": text}]},
-            # Map default 768 dimensions for database alignment
-            "outputDimensionality": 768,
+            # Map dynamic dimensions for database alignment
+            "outputDimensionality": self.output_dim,
         }
 
         async with self._get_client(timeout=10.0) as client:
@@ -82,7 +86,7 @@ class GeminiEmbeddingClient(BaseAPIClient):
                 {
                     "model": f"models/{self.model}",
                     "content": {"parts": [{"text": text}]},
-                    "outputDimensionality": 768,
+                    "outputDimensionality": self.output_dim,
                 }
             )
         payload = {"requests": requests_payload}
@@ -120,7 +124,7 @@ class GeminiChatClient(BaseAPIClient):
         self.model = settings.RAG_CHAT_MODEL
 
     async def stream_chat(
-        self, prompt: str, system_instruction: str = None
+        self, prompt: str, system_instruction: str | None = None
     ) -> AsyncGenerator[str, None]:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not configured in settings.")

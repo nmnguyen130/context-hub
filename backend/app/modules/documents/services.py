@@ -167,6 +167,7 @@ async def process_document_ingestion(self_task, document_id: str) -> None:
             if chunks:
                 # 8. Generate embeddings concurrently in batches of 100
                 import httpx
+
                 from app.core.clients import GeminiEmbeddingClient
 
                 async with httpx.AsyncClient(timeout=30.0) as http_client:

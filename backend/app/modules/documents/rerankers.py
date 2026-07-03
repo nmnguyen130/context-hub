@@ -78,6 +78,9 @@ class ContextBoostReranker(BaseReranker):
         if not query_words or not chunks:
             return chunks
 
+        max_rrf = max((c.get("rrf_score", 0.0) for c in chunks), default=0.0)
+        rrf_scale = max_rrf if max_rrf > 0.0 else 1.0
+
         for chunk in chunks:
             metadata = chunk.get("metadata") or {}
             section_title = str(metadata.get("section_title", "")).lower()
@@ -112,8 +115,9 @@ class ContextBoostReranker(BaseReranker):
                 (section_overlap * 0.4) + (doc_overlap * 0.2) + (content_jaccard * 0.4)
             )
 
-            # Final rerank score merges original RRF rank with the boost
-            chunk["rerank_score"] = chunk.get("rrf_score", 0.0) + boost
+            # Final rerank score merges normalized RRF rank with the boost (weighted combination)
+            normalized_rrf = chunk.get("rrf_score", 0.0) / rrf_scale
+            chunk["rerank_score"] = (normalized_rrf * 0.6) + (boost * 0.4)
 
         # Sort descending by new score
         chunks.sort(key=lambda x: x.get("rerank_score", 0.0), reverse=True)

@@ -1,11 +1,11 @@
 import logging
-import unicodedata
 import uuid
 
 import numpy as np
 
 from app.core.config import settings
 from app.core.redis import get_redis_client
+from app.core.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,11 @@ class SemanticCacheManager:
         except Exception:
             logger.info(f"Creating Redis Query Engine index: {self.index_name}")
             try:
-                # FT.CREATE commands: HNSW index with COSINE metric on 768-dim float32 vectors
+                from app.modules.documents.models import DocumentChunk
+
+                dim = str(DocumentChunk.embedding.type.dim)
+
+                # FT.CREATE commands: HNSW index with COSINE metric on float32 vectors
                 await self.redis.execute_command(
                     "FT.CREATE",
                     self.index_name,
@@ -49,7 +53,7 @@ class SemanticCacheManager:
                     "TYPE",
                     "FLOAT32",
                     "DIM",
-                    "768",
+                    dim,
                     "DISTANCE_METRIC",
                     "COSINE",
                 )
@@ -135,7 +139,7 @@ class SemanticCacheManager:
         if not settings.ENABLE_SEMANTIC_CACHE:
             return
 
-        normalized_query = unicodedata.normalize("NFC", query_text)
+        normalized_query = normalize_text(query_text)
         vector_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
         cache_key = f"semantic_cache:{uuid.uuid4()}"
 

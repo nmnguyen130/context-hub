@@ -79,7 +79,7 @@ class S3StorageProvider(StorageProvider):
 
     async def upload_file(self, file_obj: BinaryIO, key: str) -> None:
         try:
-            await asyncio.to_thread.run(
+            await asyncio.to_thread(
                 self.client.upload_fileobj,
                 Fileobj=file_obj,
                 Bucket=self.bucket_name,
@@ -95,13 +95,13 @@ class S3StorageProvider(StorageProvider):
                 response = self.client.get_object(Bucket=self.bucket_name, Key=key)
                 return response["Body"].read()
 
-            return await asyncio.to_thread.run(_download)
+            return await asyncio.to_thread(_download)
         except ClientError as e:
             raise RuntimeError(f"Failed to download file from S3: {str(e)}") from e
 
     async def delete_file(self, key: str) -> None:
         try:
-            await asyncio.to_thread.run(
+            await asyncio.to_thread(
                 self.client.delete_object, Bucket=self.bucket_name, Key=key
             )
         except ClientError as e:

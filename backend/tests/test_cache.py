@@ -8,6 +8,9 @@ async def test_semantic_cache_lifecycle():
     """Verify that we can set, get (similarity check), and miss cached items in Redis."""
     cache = SemanticCacheManager()
 
+    # Flush Redis to guarantee test isolation
+    await cache.redis.flushdb()
+
     # 1. Initialize VSS index
     await cache.ensure_index()
 
