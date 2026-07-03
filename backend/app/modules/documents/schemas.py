@@ -21,3 +21,8 @@ class DocumentResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChatRequest(BaseModel):
+    query: str
+    workspace_id: UUID

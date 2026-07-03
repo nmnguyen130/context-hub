@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,11 +11,50 @@ from app.api.middleware import TenantContextMiddleware
 from app.core.config import settings
 from app.core.database import get_db
 
+logger = logging.getLogger("app.main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Initialize Redis Semantic Cache VSS index on startup
+    from app.modules.documents.semantic_cache import SemanticCacheManager
+
+    cache_manager = SemanticCacheManager()
+    await cache_manager.ensure_index()
+
+    # 2. Startup Embedding Validation
+    if settings.GEMINI_API_KEY:
+        from app.core.clients import GeminiEmbeddingClient
+        from app.modules.documents.models import DocumentChunk
+
+        # Dynamically resolve dimension from SQLAlchemy model type definition
+        db_dim = DocumentChunk.embedding.type.dim
+        try:
+            client = GeminiEmbeddingClient()
+            vector = await client.get_embedding("startup_validation")
+            returned_dim = len(vector)
+            if returned_dim != db_dim:
+                logger.critical(
+                    f"Startup embedding dimension MISMATCH! "
+                    f"Database expects {db_dim}, but API returned {returned_dim}."
+                )
+                raise ValueError("Embedding model dimension mismatch.")
+            logger.info(
+                f"Startup embedding validation passed. Dimension: {returned_dim}"
+            )
+        except Exception as e:
+            logger.critical(f"Startup embedding validation FAILED: {str(e)}")
+            raise e
+
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan,
 )
 
 # 1. CORS Configuration

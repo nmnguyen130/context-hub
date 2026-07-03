@@ -36,33 +36,30 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 
 ## Phase 2: Custom Hybrid RAG & Grounded Chat Engine
 
-### [ ] Task 2.1: Semantic Text Chunking & Vector Creation
-- [ ] Build a custom Python chunking library supporting Markdown/Plain-Text formatting (splitting on header blocks, paragraphs, lists) with token counting.
-- [ ] Connect the parsing Celery worker to the Gemini Embedding API (`text-embedding-004`).
-- [ ] Create `document_chunks` table in Postgres supporting `vector` (768 dimensions) and `tsvector` columns.
-- [ ] Add GIST/GIN full-text indices and HNSW vector indices on `document_chunks`.
+### [x] Task 2.1: Semantic Text Chunking & Vector Creation
+- [x] Build a custom Python chunking library supporting Markdown/Plain-Text formatting (splitting on header blocks, paragraphs, lists) with token counting.
+- [x] Connect the parsing Celery worker to the Gemini Embedding API (`gemini-embedding-001`).
+- [x] Create `document_chunks` table in Postgres supporting `vector` (768 dimensions) and `tsvector` columns.
+- [x] Add GIST/GIN full-text indices and HNSW vector indices on `document_chunks`.
 
-### [ ] Task 2.2: Hybrid Retrieval & Reciprocal Rank Fusion (RRF)
-- [ ] Implement raw SQL or SQLAlchemy raw expressions performing dense search:
+### [x] Task 2.2: Hybrid Retrieval & Reciprocal Rank Fusion (RRF)
+- [x] Implement raw SQL or SQLAlchemy raw expressions performing dense search:
   ```sql
   SELECT id, content, (embedding <=> :query_vector) AS cosine_distance 
   FROM document_chunks WHERE tenant_id = :tenant_id
   ```
-- [ ] Implement sparse search:
+- [x] Implement sparse search:
   ```sql
   SELECT id, content, ts_rank_cd(search_vector, to_tsquery(:query_text)) AS text_rank 
   FROM document_chunks WHERE tenant_id = :tenant_id
   ```
-- [ ] Build a Python module implementing Reciprocal Rank Fusion (RRF) combining dense search rank and sparse search rank.
-- [ ] Set up Cohere Rerank API integration to refine the top 20 fused candidates to the top 5.
+- [x] Build a Python module implementing Reciprocal Rank Fusion (RRF) combining dense search rank and sparse search rank.
+- [x] Set up Cohere Rerank API integration (and zero-cost ContextBoostReranker) to refine candidate chunks.
 
-### [ ] Task 2.3: Grounded Conversational AI Stream
-- [ ] Implement streaming API router `/api/v1/chat/stream` in FastAPI.
-- [ ] Draft system prompt instructing Gemini to:
-  1. Rely **exclusively** on the injected document chunks.
-  2. Use strict inline citation references `[^[chunk_id]]` when leveraging facts.
-  3. Respond with a fallback string if facts are absent.
-- [ ] Write Python parser extracting chunk citations from LLM responses, retrieving referenced chunk metadata, and building a structured JSON response payload alongside the text stream.
+### [/] Task 2.3: Grounded Conversational AI Stream
+- [x] Implement streaming API router `/api/v1/chat/stream` in FastAPI.
+- [x] Draft system prompt instructing Gemini to rely exclusively on context and output citations.
+- [x] Write Python parser extracting chunk citations from LLM responses, retrieving referenced chunk metadata, and building a structured JSON response payload alongside the text stream.
 - [ ] Build a streaming chat UI in Next.js displaying citations with hoverable tooltip metadata (Document Name, Excerpt).
 
 ---

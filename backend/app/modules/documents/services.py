@@ -90,3 +90,133 @@ async def process_document_upload(
     parse_document_task.delay(str(doc.id))
 
     return doc
+
+
+async def process_document_ingestion(self_task, document_id: str) -> None:
+    """
+    Service function encapsulating document download, parsing, chunking,
+    embedding generation, and storage in the database. Called by Celery worker.
+    """
+    import asyncio
+
+    import boto3
+    import botocore.exceptions
+    import sqlalchemy.exc
+    from sqlalchemy import delete, func, select
+
+    from app.core.config import settings
+    from app.core.database import AsyncSessionLocal
+    from app.core.storage import get_storage_client
+    from app.modules.documents.parsers import parser_registry
+
+    # 1. Open DB session with tenant filter disabled for background worker
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(Document)
+            .where(Document.id == uuid.UUID(document_id))
+            .execution_options(skip_tenant_filter=True)
+        )
+        doc = (await db.execute(stmt)).scalar_one_or_none()
+        if not doc:
+            raise ValueError(f"Document {document_id} not found in database.")
+
+        # 2. Update status to PARSING
+        doc.status = "PARSING"
+        doc.error_message = None
+        await db.commit()
+        await db.refresh(doc)
+
+        try:
+            # 3. Download raw bytes from S3
+            storage = get_storage_client()
+            content = storage.download_file(doc.object_store_key)
+
+            # 4. Resolve parser and parse file contents
+            parser = parser_registry.get_parser(doc.name)
+            extracted_text = parser.parse(content)
+
+            # 5. Upload parsed plain text to S3 (same parent directory)
+            raw_key_prefix = doc.object_store_key.rsplit("/", 1)[0]
+            extracted_key = f"{raw_key_prefix}/extracted.txt"
+            extracted_stream = io.BytesIO(extracted_text.encode("utf-8"))
+            storage.upload_file(extracted_stream, extracted_key)
+
+            # 6. Delete existing chunks if any (idempotency)
+            from app.modules.documents.models import DocumentChunk
+
+            delete_stmt = delete(DocumentChunk).where(
+                DocumentChunk.document_id == doc.id
+            )
+            await db.execute(delete_stmt)
+
+            # 7. Generate structural Markdown chunks
+            from app.modules.documents.chunkers import MarkdownStructureChunker
+
+            chunker = MarkdownStructureChunker()
+            chunks = chunker.chunk_document(extracted_text, doc.name)
+
+            if chunks:
+                # 8. Generate embeddings concurrently
+                from app.core.clients import GeminiEmbeddingClient
+
+                embedding_client = GeminiEmbeddingClient()
+                semaphore = asyncio.Semaphore(10)
+
+                async def embed_chunk(c):
+                    async with semaphore:
+                        return await embedding_client.get_embedding(c["content"])
+
+                embed_tasks = [embed_chunk(c) for c in chunks]
+                vectors = await asyncio.gather(*embed_tasks)
+
+                # 9. Save chunks to DB
+                chunk_objects = []
+                for chunk, vector in zip(chunks, vectors):
+                    chunk_obj = DocumentChunk(
+                        document_id=doc.id,
+                        tenant_id=doc.tenant_id,
+                        content=chunk["content"],
+                        embedding=vector,
+                        search_vector=func.to_tsvector(
+                            settings.RAG_FTS_LANGUAGE, chunk["content"]
+                        ),
+                        metadata_json=chunk["metadata"],
+                    )
+                    chunk_objects.append(chunk_obj)
+
+                db.add_all(chunk_objects)
+
+            # 10. Update status to ACTIVE
+            doc.status = "ACTIVE"
+            await db.commit()
+
+        except (
+            boto3.exceptions.Boto3Error,
+            botocore.exceptions.BotoCoreError,
+            sqlalchemy.exc.OperationalError,
+            OSError,
+        ) as infra_err:
+            await db.rollback()
+            # Infrastructure exception: request Celery retry with exponential backoff
+            retry_count = self_task.request.retries
+            countdown = 2**retry_count
+            try:
+                raise self_task.retry(exc=infra_err, countdown=countdown, max_retries=3)
+            except self_task.MaxRetriesExceededError:
+                # All retries exhausted: mark document as ERROR
+                doc.status = "ERROR"
+                doc.error_message = (
+                    f"Infrastructure failure (retries exhausted): {str(infra_err)}"[
+                        :255
+                    ]
+                )
+                await db.commit()
+                raise infra_err
+
+        except Exception as logic_err:
+            await db.rollback()
+            # Logical exception (unsupported format, corrupt file): mark as ERROR immediately
+            doc.status = "ERROR"
+            doc.error_message = f"Parsing failed: {str(logic_err)}"[:255]
+            await db.commit()
+            raise logic_err

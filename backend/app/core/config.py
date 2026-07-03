@@ -43,6 +43,29 @@ class Settings(BaseSettings):
     S3_REGION_NAME: str | None = Field(default=None)
     S3_SECURE: bool = Field(default=True)
 
+    # API Credentials
+    GEMINI_API_KEY: str | None = Field(default=None)
+    COHERE_API_KEY: str | None = Field(default=None)
+
+    # RAG Pipeline Configuration
+    RAG_EMBEDDING_MODEL: str = Field(default="gemini-embedding-001")
+    RAG_CHAT_MODEL: str = Field(default="gemini-2.0-flash")
+    RAG_RERANK_PROVIDER: str = Field(
+        default="context_boost"
+    )  # "none", "cohere", "context_boost"
+
+    # Search Thresholds & FTS Settings
+    RAG_FTS_LANGUAGE: str = Field(default="simple")
+    RAG_LIMIT_DENSE: int = Field(default=50)
+    RAG_LIMIT_SPARSE: int = Field(default=50)
+    RAG_LIMIT_FUSED: int = Field(default=20)
+    RAG_FINAL_TOP_K: int = Field(default=5)
+    RAG_RELEVANCE_THRESHOLD: float = Field(default=0.05)
+
+    # Semantic Caching
+    ENABLE_SEMANTIC_CACHE: bool = Field(default=True)
+    SEMANTIC_CACHE_THRESHOLD: float = Field(default=0.95)
+
     @model_validator(mode="after")
     def assemble_urls(self) -> "Settings":
         if self.DATABASE_URL is None:

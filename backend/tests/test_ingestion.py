@@ -12,8 +12,9 @@ from app.core.security import create_access_token
 from app.core.storage import StorageProvider
 from app.modules.auth.models import User
 from app.modules.documents.models import Document, Workspace
+from app.modules.documents.services import process_document_ingestion
 from app.modules.tenant.models import Tenant
-from app.worker.tasks import _async_parse_document, parse_document_task
+from app.worker.tasks import parse_document_task
 
 
 # 1. Implementation of Memory Storage Provider for testing S3 key uploads
@@ -124,7 +125,11 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
 
         # Run Celery parsing task synchronously
         mock_delay.assert_called_once_with(doc_id)
-        await _async_parse_document(parse_document_task, doc_id)
+        with patch(
+            "app.core.clients.GeminiEmbeddingClient.get_embedding",
+            return_value=[0.1] * 768,
+        ):
+            await process_document_ingestion(parse_document_task, doc_id)
 
     # Verify document status updated to ACTIVE in DB
     db.expire_all()
@@ -157,7 +162,11 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
         pdf_doc_id = res_data["id"]
 
         # Run Celery parsing task synchronously
-        await _async_parse_document(parse_document_task, pdf_doc_id)
+        with patch(
+            "app.core.clients.GeminiEmbeddingClient.get_embedding",
+            return_value=[0.1] * 768,
+        ):
+            await process_document_ingestion(parse_document_task, pdf_doc_id)
 
     db.expire_all()
     stmt = select(Document).where(Document.id == uuid.UUID(pdf_doc_id))
@@ -205,7 +214,11 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
 
         # Run worker (it should raise Exception during parsing and transition doc to ERROR)
         with pytest.raises(Exception):
-            await _async_parse_document(parse_document_task, corrupt_doc_id)
+            with patch(
+                "app.core.clients.GeminiEmbeddingClient.get_embedding",
+                return_value=[0.1] * 768,
+            ):
+                await process_document_ingestion(parse_document_task, corrupt_doc_id)
 
     db.expire_all()
     stmt = select(Document).where(Document.id == uuid.UUID(corrupt_doc_id))

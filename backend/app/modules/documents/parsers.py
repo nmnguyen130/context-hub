@@ -27,7 +27,7 @@ class PDFParser(DocumentParser):
 
         # Load PDF directly from memory bytes
         doc = pymupdf.open(stream=content, filetype="pdf")
-        
+
         # Extract Markdown structure with page chunking
         chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
         text_parts = [chunk["text"] for chunk in chunks]
