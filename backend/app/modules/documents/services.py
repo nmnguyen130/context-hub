@@ -77,7 +77,7 @@ async def process_document_upload(
 
     # Upload raw file payload to S3
     raw_stream = io.BytesIO(content)
-    storage.upload_file(raw_stream, doc.object_store_key)
+    await storage.upload_file(raw_stream, doc.object_store_key)
 
     # Update DB record with checksum
     doc.checksum = checksum
@@ -97,7 +97,6 @@ async def process_document_ingestion(self_task, document_id: str) -> None:
     Service function encapsulating document download, parsing, chunking,
     embedding generation, and storage in the database. Called by Celery worker.
     """
-    import asyncio
 
     import boto3
     import botocore.exceptions
@@ -129,7 +128,7 @@ async def process_document_ingestion(self_task, document_id: str) -> None:
         try:
             # 3. Download raw bytes from S3
             storage = get_storage_client()
-            content = storage.download_file(doc.object_store_key)
+            content = await storage.download_file(doc.object_store_key)
 
             # 4. Resolve parser and parse file contents
             parser = parser_registry.get_parser(doc.name)
@@ -139,7 +138,7 @@ async def process_document_ingestion(self_task, document_id: str) -> None:
             raw_key_prefix = doc.object_store_key.rsplit("/", 1)[0]
             extracted_key = f"{raw_key_prefix}/extracted.txt"
             extracted_stream = io.BytesIO(extracted_text.encode("utf-8"))
-            storage.upload_file(extracted_stream, extracted_key)
+            await storage.upload_file(extracted_stream, extracted_key)
 
             # 6. Delete existing chunks if any (idempotency)
             from app.modules.documents.models import DocumentChunk
@@ -151,23 +150,35 @@ async def process_document_ingestion(self_task, document_id: str) -> None:
 
             # 7. Generate structural Markdown chunks
             from app.modules.documents.chunkers import MarkdownStructureChunker
+            from app.modules.documents.models import Workspace
 
-            chunker = MarkdownStructureChunker()
+            dlp_action = settings.RAG_DLP_ACTION
+            if doc.workspace_id:
+                w_stmt = select(Workspace).where(Workspace.id == doc.workspace_id)
+                workspace = (await db.execute(w_stmt)).scalar_one_or_none()
+                if workspace:
+                    dlp_action = getattr(
+                        workspace, "dlp_action", settings.RAG_DLP_ACTION
+                    )
+
+            chunker = MarkdownStructureChunker(dlp_action=dlp_action)
             chunks = chunker.chunk_document(extracted_text, doc.name)
 
             if chunks:
-                # 8. Generate embeddings concurrently
+                # 8. Generate embeddings concurrently in batches of 100
+                import httpx
                 from app.core.clients import GeminiEmbeddingClient
 
-                embedding_client = GeminiEmbeddingClient()
-                semaphore = asyncio.Semaphore(10)
-
-                async def embed_chunk(c):
-                    async with semaphore:
-                        return await embedding_client.get_embedding(c["content"])
-
-                embed_tasks = [embed_chunk(c) for c in chunks]
-                vectors = await asyncio.gather(*embed_tasks)
+                async with httpx.AsyncClient(timeout=30.0) as http_client:
+                    embedding_client = GeminiEmbeddingClient(client=http_client)
+                    chunk_texts = [c["content"] for c in chunks]
+                    vectors = []
+                    for i in range(0, len(chunk_texts), 100):
+                        batch = chunk_texts[i : i + 100]
+                        batch_vectors = await embedding_client.get_embeddings_batch(
+                            batch
+                        )
+                        vectors.extend(batch_vectors)
 
                 # 9. Save chunks to DB
                 chunk_objects = []

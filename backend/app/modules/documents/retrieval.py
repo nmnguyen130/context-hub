@@ -2,6 +2,7 @@ import logging
 import unicodedata
 import uuid
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 async def retrieve_grounding_chunks(
-    db: AsyncSession, tenant_id: uuid.UUID, query: str
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    query: str,
+    query_vector: list[float] | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
     """
     Modular Retrieval pipeline combining Dense Vector Search, Sparse Keyword Search (FTS),
@@ -26,13 +31,14 @@ async def retrieve_grounding_chunks(
     # Unicode NFC Normalization for Vietnamese query compatibility
     normalized_query = unicodedata.normalize("NFC", query)
 
-    # 1. Dense Vector Search
-    embedding_client = GeminiEmbeddingClient()
-    try:
-        query_vector = await embedding_client.get_embedding(normalized_query)
-    except Exception as e:
-        logger.error(f"Failed to generate embedding for query: {str(e)}")
-        query_vector = None
+    # 1. Dense Vector Search (skip embedding retrieval if query_vector is precomputed)
+    if query_vector is None:
+        embedding_client = GeminiEmbeddingClient(client=http_client)
+        try:
+            query_vector = await embedding_client.get_embedding(normalized_query)
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for query: {str(e)}")
+            query_vector = None
 
     dense_results = []
     if query_vector is not None:
@@ -65,21 +71,14 @@ async def retrieve_grounding_chunks(
     rrf_scores = {}  # Chunk ID -> aggregated score
     chunk_map = {}  # Chunk ID -> DocumentChunk ORM object
 
-    # Accumulate Dense ranks
-    for rank, chunk in enumerate(dense_results):
-        chunk_id = chunk.id
-        chunk_map[chunk_id] = chunk
-        rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (
-            1.0 / (k_rrf + (rank + 1))
-        )
-
-    # Accumulate Sparse ranks
-    for rank, chunk in enumerate(sparse_results):
-        chunk_id = chunk.id
-        chunk_map[chunk_id] = chunk
-        rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (
-            1.0 / (k_rrf + (rank + 1))
-        )
+    # Accumulate Dense and Sparse ranks
+    for results in (dense_results, sparse_results):
+        for rank, chunk in enumerate(results):
+            chunk_id = chunk.id
+            chunk_map[chunk_id] = chunk
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (
+                1.0 / (k_rrf + (rank + 1))
+            )
 
     if not rrf_scores:
         return []
@@ -106,7 +105,7 @@ async def retrieve_grounding_chunks(
         )
 
     # 4. Semantic Reranking (NoOp/RRF vs Cohere Rerank API)
-    reranker = get_reranker()
+    reranker = get_reranker(client=http_client)
     reranked_chunks = await reranker.rerank(normalized_query, chunks_for_rerank)
 
     # 5. Corrective Gate (Filters out chunks below relevance threshold)

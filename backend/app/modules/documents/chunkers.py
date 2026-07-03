@@ -24,6 +24,14 @@ def dlp_filter_hook(content: str) -> str:
     return masked_content
 
 
+def has_pii(content: str) -> bool:
+    """Returns True if any PII pattern matches the content."""
+    for pattern in PII_PATTERNS.values():
+        if pattern.search(content):
+            return True
+    return False
+
+
 class MarkdownStructureChunker:
     """
     Structure-aware chunker designed for Markdown content.
@@ -31,9 +39,15 @@ class MarkdownStructureChunker:
     to prevent sentence fragmentation and tiny low-context chunks.
     """
 
-    def __init__(self, target_chunk_size: int = 2000, chunk_overlap: int = 200):
+    def __init__(
+        self,
+        target_chunk_size: int = 2000,
+        chunk_overlap: int = 200,
+        dlp_action: str = "MASK",
+    ):
         self.target_chunk_size = target_chunk_size
         self.chunk_overlap = chunk_overlap
+        self.dlp_action = dlp_action.upper().strip()
 
     def chunk_document(self, text: str, document_name: str) -> list[dict]:
         if not text:
@@ -41,6 +55,13 @@ class MarkdownStructureChunker:
 
         # 1. Normalize text to Unicode NFC to ensure consistent Vietnamese accent matching
         normalized_text = unicodedata.normalize("NFC", text)
+
+        def _process_chunk_text(chunk_content: str) -> str:
+            if self.dlp_action == "REJECT" and has_pii(chunk_content):
+                raise ValueError("PII detected in document chunk. Ingestion rejected.")
+            elif self.dlp_action == "MASK":
+                return dlp_filter_hook(chunk_content)
+            return chunk_content
 
         # 2. Record page boundaries (offsets of form feed '\f')
         page_boundaries = []
@@ -146,7 +167,7 @@ class MarkdownStructureChunker:
             ):
                 # Save previous accumulated chunk
                 chunk_content = "\n\n".join(p["text"] for p in current_chunk_paras)
-                scrubbed_text = dlp_filter_hook(chunk_content)
+                scrubbed_text = _process_chunk_text(chunk_content)
                 start_page = get_page_number(primary_start_offset)
 
                 chunks.append(
@@ -192,7 +213,7 @@ class MarkdownStructureChunker:
         # Add remaining accumulated chunk
         if current_chunk_paras:
             chunk_content = "\n\n".join(p["text"] for p in current_chunk_paras)
-            scrubbed_text = dlp_filter_hook(chunk_content)
+            scrubbed_text = _process_chunk_text(chunk_content)
             start_page = get_page_number(primary_start_offset)
             chunks.append(
                 {

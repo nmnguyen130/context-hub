@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.middleware import TenantContextMiddleware
+from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import get_db
 
@@ -114,8 +115,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
 
 # 4. API Core Router Registration
-from app.api.router import api_router
-
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 

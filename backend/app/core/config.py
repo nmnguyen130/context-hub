@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = Field(default="contexthub")
     S3_REGION_NAME: str | None = Field(default=None)
     S3_SECURE: bool = Field(default=True)
+    MAX_FILE_SIZE_MB: int = Field(default=20)
 
     # API Credentials
     GEMINI_API_KEY: str | None = Field(default=None)
@@ -65,6 +66,9 @@ class Settings(BaseSettings):
     # Semantic Caching
     ENABLE_SEMANTIC_CACHE: bool = Field(default=True)
     SEMANTIC_CACHE_THRESHOLD: float = Field(default=0.95)
+
+    # Data Loss Prevention (DLP)
+    RAG_DLP_ACTION: str = Field(default="MASK")  # "MASK", "REJECT", "NONE"
 
     @model_validator(mode="after")
     def assemble_urls(self) -> "Settings":

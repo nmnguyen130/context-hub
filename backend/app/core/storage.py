@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import BinaryIO
 
@@ -12,17 +13,17 @@ class StorageProvider(ABC):
     """Abstract interface defining the decoupled Storage operations."""
 
     @abstractmethod
-    def upload_file(self, file_obj: BinaryIO, key: str) -> None:
+    async def upload_file(self, file_obj: BinaryIO, key: str) -> None:
         """Uploads a binary file stream to the storage store."""
         pass
 
     @abstractmethod
-    def download_file(self, key: str) -> bytes:
+    async def download_file(self, key: str) -> bytes:
         """Downloads a file's raw payload bytes from the storage store."""
         pass
 
     @abstractmethod
-    def delete_file(self, key: str) -> None:
+    async def delete_file(self, key: str) -> None:
         """Deletes a file and all its versions from the storage store."""
         pass
 
@@ -72,28 +73,37 @@ class S3StorageProvider(StorageProvider):
                         )
                     else:
                         self.client.create_bucket(Bucket=self.bucket_name)
-                except ClientError as ce:
+                except ClientError:
                     # Log or ignore if parallel creation occurs
                     pass
 
-    def upload_file(self, file_obj: BinaryIO, key: str) -> None:
+    async def upload_file(self, file_obj: BinaryIO, key: str) -> None:
         try:
-            self.client.upload_fileobj(
-                Fileobj=file_obj, Bucket=self.bucket_name, Key=key
+            await asyncio.to_thread.run(
+                self.client.upload_fileobj,
+                Fileobj=file_obj,
+                Bucket=self.bucket_name,
+                Key=key,
             )
         except ClientError as e:
             raise RuntimeError(f"Failed to upload file to S3: {str(e)}") from e
 
-    def download_file(self, key: str) -> bytes:
+    async def download_file(self, key: str) -> bytes:
         try:
-            response = self.client.get_object(Bucket=self.bucket_name, Key=key)
-            return response["Body"].read()
+
+            def _download():
+                response = self.client.get_object(Bucket=self.bucket_name, Key=key)
+                return response["Body"].read()
+
+            return await asyncio.to_thread.run(_download)
         except ClientError as e:
             raise RuntimeError(f"Failed to download file from S3: {str(e)}") from e
 
-    def delete_file(self, key: str) -> None:
+    async def delete_file(self, key: str) -> None:
         try:
-            self.client.delete_object(Bucket=self.bucket_name, Key=key)
+            await asyncio.to_thread.run(
+                self.client.delete_object, Bucket=self.bucket_name, Key=key
+            )
         except ClientError as e:
             raise RuntimeError(f"Failed to delete file from S3: {str(e)}") from e
 

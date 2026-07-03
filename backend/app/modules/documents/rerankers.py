@@ -1,6 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
 
+import httpx
+
 from app.core.clients import CohereRerankClient
 from app.core.config import settings
 
@@ -33,8 +35,8 @@ class NoOpReranker(BaseReranker):
 class CohereReranker(BaseReranker):
     """Concrete reranker invoking Cohere's multi-lingual reranking endpoint."""
 
-    def __init__(self):
-        self.client = CohereRerankClient()
+    def __init__(self, client: httpx.AsyncClient | None = None):
+        self.client = CohereRerankClient(client=client)
 
     async def rerank(self, query: str, chunks: list[dict]) -> list[dict]:
         if not chunks:
@@ -118,11 +120,11 @@ class ContextBoostReranker(BaseReranker):
         return chunks
 
 
-def get_reranker() -> BaseReranker:
+def get_reranker(client: httpx.AsyncClient | None = None) -> BaseReranker:
     """Factory resolver for Reranker instances based on configuration settings."""
     provider = settings.RAG_RERANK_PROVIDER.lower().strip()
     if provider == "cohere":
-        return CohereReranker()
+        return CohereReranker(client=client)
     elif provider == "context_boost":
         return ContextBoostReranker()
     return NoOpReranker()

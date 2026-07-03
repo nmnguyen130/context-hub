@@ -140,16 +140,17 @@ class SemanticCacheManager:
         cache_key = f"semantic_cache:{uuid.uuid4()}"
 
         try:
-            await self.redis.hset(
-                cache_key,
-                mapping={
-                    "query_text": normalized_query.encode("utf-8"),
-                    "answer": answer.encode("utf-8"),
-                    "embedding": vector_bytes,
-                },
-            )
-            # Expire cache entries in 7 days (604800 seconds)
-            await self.redis.expire(cache_key, 7 * 24 * 3600)
+            async with self.redis.pipeline(transaction=True) as pipe:
+                pipe.hset(
+                    cache_key,
+                    mapping={
+                        "query_text": normalized_query.encode("utf-8"),
+                        "answer": answer.encode("utf-8"),
+                        "embedding": vector_bytes,
+                    },
+                )
+                pipe.expire(cache_key, 7 * 24 * 3600)
+                await pipe.execute()
             logger.info(
                 f"Saved query to Redis semantic cache: {normalized_query[:40]}..."
             )

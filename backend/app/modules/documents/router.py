@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import get_storage_client
 from app.modules.auth.models import User
@@ -42,6 +43,13 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file format: '.{ext}'. Supported formats: .pdf, .txt, .md",
+        )
+
+    max_size_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    if file.size and file.size > max_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds the limit of {settings.MAX_FILE_SIZE_MB}MB.",
         )
 
     # 2. Create database record in PENDING state
@@ -123,7 +131,7 @@ async def delete_document(
 
     # Delete raw file
     try:
-        storage_client.delete_file(doc.object_store_key)
+        await storage_client.delete_file(doc.object_store_key)
     except Exception:
         pass  # Ignore missing files on S3 to prevent locking deletes
 
@@ -131,7 +139,7 @@ async def delete_document(
     try:
         raw_key_prefix = doc.object_store_key.rsplit("/", 1)[0]
         extracted_key = f"{raw_key_prefix}/extracted.txt"
-        storage_client.delete_file(extracted_key)
+        await storage_client.delete_file(extracted_key)
     except Exception:
         pass
 

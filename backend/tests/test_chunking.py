@@ -52,3 +52,26 @@ def test_markdown_structure_chunker_basic():
     assert len(p2_chunks) > 0
     assert p2_chunks[0]["metadata"]["section_title"] == "Heading 2"
     assert "paragraph 3" in p2_chunks[0]["content"]
+
+
+def test_dlp_action_mask():
+    chunker = MarkdownStructureChunker(dlp_action="MASK")
+    doc_text = "My email is user@test.com"
+    chunks = chunker.chunk_document(doc_text, "test.md")
+    assert "[[MASKED_EMAIL]]" in chunks[0]["content"]
+
+
+def test_dlp_action_none():
+    chunker = MarkdownStructureChunker(dlp_action="NONE")
+    doc_text = "My email is user@test.com"
+    chunks = chunker.chunk_document(doc_text, "test.md")
+    assert "user@test.com" in chunks[0]["content"]
+
+
+def test_dlp_action_reject():
+    chunker = MarkdownStructureChunker(dlp_action="REJECT")
+    doc_text = "My email is user@test.com"
+    import pytest
+
+    with pytest.raises(ValueError, match="PII detected"):
+        chunker.chunk_document(doc_text, "test.md")

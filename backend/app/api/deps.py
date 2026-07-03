@@ -1,4 +1,3 @@
-from typing import AsyncGenerator
 from uuid import UUID
 
 import jwt

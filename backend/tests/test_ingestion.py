@@ -22,15 +22,15 @@ class MemoryStorageProvider(StorageProvider):
     def __init__(self):
         self.storage = {}
 
-    def upload_file(self, file_obj, key: str) -> None:
+    async def upload_file(self, file_obj, key: str) -> None:
         self.storage[key] = file_obj.read()
 
-    def download_file(self, key: str) -> bytes:
+    async def download_file(self, key: str) -> bytes:
         if key not in self.storage:
             raise RuntimeError(f"Key not found in memory store: {key}")
         return self.storage[key]
 
-    def delete_file(self, key: str) -> None:
+    async def delete_file(self, key: str) -> None:
         if key in self.storage:
             del self.storage[key]
 
@@ -126,8 +126,8 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
         # Run Celery parsing task synchronously
         mock_delay.assert_called_once_with(doc_id)
         with patch(
-            "app.core.clients.GeminiEmbeddingClient.get_embedding",
-            return_value=[0.1] * 768,
+            "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+            side_effect=lambda texts: [[0.1] * 768 for _ in texts],
         ):
             await process_document_ingestion(parse_document_task, doc_id)
 
@@ -163,8 +163,8 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
 
         # Run Celery parsing task synchronously
         with patch(
-            "app.core.clients.GeminiEmbeddingClient.get_embedding",
-            return_value=[0.1] * 768,
+            "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+            side_effect=lambda texts: [[0.1] * 768 for _ in texts],
         ):
             await process_document_ingestion(parse_document_task, pdf_doc_id)
 
@@ -215,8 +215,8 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
         # Run worker (it should raise Exception during parsing and transition doc to ERROR)
         with pytest.raises(Exception):
             with patch(
-                "app.core.clients.GeminiEmbeddingClient.get_embedding",
-                return_value=[0.1] * 768,
+                "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+                side_effect=lambda texts: [[0.1] * 768 for _ in texts],
             ):
                 await process_document_ingestion(parse_document_task, corrupt_doc_id)
 
@@ -250,3 +250,44 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
     extracted_key = f"{str(tenant_a_id)}/{str(workspace_a_id)}/{doc_id}/extracted.txt"
     assert raw_key not in mem_storage.storage
     assert extracted_key not in mem_storage.storage
+
+
+@pytest.mark.asyncio
+async def test_document_upload_size_limit(client: AsyncClient, db: AsyncSession):
+    # Setup Tenant and User
+    tenant = Tenant(name="Size Limit Tenant")
+    db.add(tenant)
+    await db.commit()
+    await db.refresh(tenant)
+
+    user = User(
+        email="size_test@test.com",
+        password_hash="...",
+        first_name="Size",
+        last_name="Test",
+        role="ADMIN",
+        tenant_id=tenant.id,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    workspace = Workspace(name="Size Space", tenant_id=tenant.id)
+    db.add(workspace)
+    await db.commit()
+    await db.refresh(workspace)
+
+    token = create_access_token(user.id, tenant.id, user.role)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Construct payload exceeding default 20MB limit (25MB)
+    large_content = b"x" * (25 * 1024 * 1024)
+    files = {"file": ("massive.pdf", large_content, "application/pdf")}
+
+    response = await client.post(
+        f"/api/v1/documents/workspaces/{workspace.id}",
+        files=files,
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert "exceeds the limit" in response.json()["detail"]

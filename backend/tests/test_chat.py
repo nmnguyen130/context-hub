@@ -109,7 +109,7 @@ async def test_chat_stream_flow(client: AsyncClient, db: AsyncSession):
             with patch(
                 "app.modules.documents.chat_router.retrieve_grounding_chunks",
                 return_value=mock_chunks,
-            ) as mock_retrieval:
+            ):
                 with patch(
                     "app.core.clients.GeminiChatClient.stream_chat",
                     side_effect=mock_stream_chat,
