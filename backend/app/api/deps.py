@@ -1,66 +1,62 @@
-from uuid import UUID
+from typing import AsyncGenerator
 
-import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.middleware import AuthContext
 from app.core.config import settings
-from app.core.database import get_db
-from app.core.tenant_context import get_current_tenant_id
+from app.core.enums import UserRole
+from app.infrastructure.container import RAGContainer
 from app.modules.auth.models import User
 
-# OAuth2 scheme config (points to our token endpoint)
+
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Request-scoped session from the lifespan-managed pool."""
+    async with request.app.state.db.session_factory() as session:
+        async with session.begin():
+            yield session
+
+
+def get_infra(request: Request, db: AsyncSession = Depends(get_db)) -> RAGContainer:
+    return RAGContainer(
+        db=db,
+        redis=request.app.state.redis,
+        storage=request.app.state.storage,
+    )
+
+
+# OAuth2 scheme configuration
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/auth/token", auto_error=False
+    tokenUrl=f"{settings.API_V1_STR}/auth/login", auto_error=False
 )
 
 
-async def get_current_user(
-    db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)
-) -> User:
-    """
-    Decodes the JWT token, fetches the user from the database,
-    and validates tenant scope.
-    """
-    if not token:
+async def get_auth_context(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+) -> AuthContext:
+    """Retrieves the pre-resolved stateless authentication context from request state."""
+    identity = getattr(request.state, "identity", None)
+    if not identity:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return identity
 
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
-        user_id: str = payload.get("sub")
-        tenant_id_str: str = payload.get("tenant_id")
-        if not user_id or not tenant_id_str:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-            )
-    except jwt.PyJWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        ) from e
 
-    # Fetch user from DB. Note: Our do_orm_execute listener will automatically
-    # append tenant_id filter if current_tenant_id contextvar is set!
-    # To be extremely safe, we verify both.
-    current_tenant_id = get_current_tenant_id()
-    if not current_tenant_id or str(current_tenant_id) != tenant_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant context mismatch",
-        )
-
-    stmt = select(User).where(User.id == UUID(user_id))
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+async def get_current_user(
+    auth_ctx: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Returns the authenticated User by fetching from the database."""
+    # Ensure User query is scoped to their tenant via default criteria or manual filter
+    # But since it's global email check, let's load it directly.
+    stmt = select(User).where(User.id == auth_ctx.user_id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user:
         raise HTTPException(
@@ -80,10 +76,10 @@ async def get_current_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Verifies that the authenticated user has ADMIN rights."""
-    if current_user.role != "ADMIN":
+    """Verifies that the user has ADMIN role."""
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator permissions required",
+            detail="Admin permissions required",
         )
     return current_user

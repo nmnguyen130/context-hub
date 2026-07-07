@@ -1,3 +1,5 @@
+import hashlib
+import uuid as uuid_mod
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -6,99 +8,85 @@ import jwt
 
 from app.core.config import settings
 
+_BCRYPT_MAX_BYTES = 72
+
+
+def _truncate_pwd(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
+
 
 def hash_password(password: str) -> str:
-    """
-    Hashes a password using bcrypt.
-    Enforces maximum password length of 72 bytes to prevent bcrypt ValueErrors.
-    """
-    pwd_bytes = password.encode("utf-8")
-    if len(pwd_bytes) > 72:
-        # Truncate to 72 bytes explicitly as required by bcrypt 4.0.0
-        pwd_bytes = pwd_bytes[:72]
-
+    """Hashes a password using bcrypt."""
     salt = bcrypt.gensalt(rounds=12)
-    hashed = bcrypt.hashpw(pwd_bytes, salt)
-    return hashed.decode("utf-8")
+    return bcrypt.hashpw(_truncate_pwd(password), salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str | None) -> bool:
-    """
-    Verifies a plain password against a bcrypt hash in constant time.
-    Returns False if password_hash is not set (e.g., SSO users).
-    """
+    """Verifies a plain password against a bcrypt hash."""
     if not hashed_password:
         return False
-
-    pwd_bytes = plain_password.encode("utf-8")
-    if len(pwd_bytes) > 72:
-        pwd_bytes = pwd_bytes[:72]
-
-    hashed_bytes = hashed_password.encode("utf-8")
     try:
-        return bcrypt.checkpw(pwd_bytes, hashed_bytes)
+        return bcrypt.checkpw(
+            _truncate_pwd(plain_password), hashed_password.encode("utf-8")
+        )
     except ValueError:
-        # Invalid hash format
         return False
+
+
+def hash_token(token: str) -> str:
+    """SHA-256 hash a token for secure storage/lookup."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def create_access_token(
     user_id: UUID, tenant_id: UUID, role: str, expires_delta: timedelta | None = None
 ) -> str:
-    """
-    Generates a secure signed JWT Access Token containing user claims.
-    """
-    if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
-    else:
-        expire = datetime.now(UTC) + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-        )
-
+    """Generates a signed JWT Access Token containing user claims."""
+    expire = datetime.now(UTC) + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode = {
         "sub": str(user_id),
         "tenant_id": str(tenant_id),
         "role": role,
+        "type": "access",
+        "jti": uuid_mod.uuid4().hex,
         "exp": expire,
     }
-    encoded_jwt = jwt.encode(
-        to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_refresh_token(
+    user_id: UUID, tenant_id: UUID, expires_delta: timedelta | None = None
+) -> tuple[str, str, datetime]:
+    """Generates a signed JWT Refresh Token. Returns (token_string, jti, expires_at)."""
+    jti = uuid_mod.uuid4().hex
+    expires_at = datetime.now(UTC) + (
+        expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
-    return encoded_jwt
-
-
-def create_invite_token(
-    tenant_id: UUID, email: str, role: str = "MEMBER", expires_in_days: int = 7
-) -> str:
-    """
-    Generates a signed JWT invitation token to join an existing organization.
-    Ensures safe enterprise onboarding.
-    """
-    expire = datetime.now(UTC) + timedelta(days=expires_in_days)
     to_encode = {
-        "invite_tenant_id": str(tenant_id),
-        "invite_email": email.lower(),
-        "invite_role": role,
-        "exp": expire,
+        "sub": str(user_id),
+        "tenant_id": str(tenant_id),
+        "type": "refresh",
+        "jti": jti,
+        "exp": expires_at,
     }
-    encoded_jwt = jwt.encode(
-        to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    token = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return token, jti, expires_at
+
+
+def decode_token(token: str, expected_type: str = "access") -> dict:
+    """Decodes and validates a JWT token, checking the type claim.
+
+    Raises:
+        jwt.PyJWTError: If the token is invalid or expired.
+        ValueError: If the token type doesn't match expected_type.
+    """
+    payload = jwt.decode(
+        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
     )
-    return encoded_jwt
-
-
-def decode_invite_token(token: str) -> dict | None:
-    """
-    Decodes and validates a signed invitation token.
-    Returns decoded claims if valid, None otherwise.
-    """
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+    if payload.get("type") != expected_type:
+        raise ValueError(
+            f"Expected token type '{expected_type}', got '{payload.get('type')}'"
         )
-        # Verify it is an invite token
-        if "invite_tenant_id" in payload and "invite_email" in payload:
-            return payload
-    except jwt.PyJWTError:
-        pass
-    return None
+    return payload

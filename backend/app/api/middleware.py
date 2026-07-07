@@ -1,56 +1,151 @@
+import uuid
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from uuid import UUID
 
 import jwt
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import settings
-from app.core.tenant_context import reset_current_tenant_id, set_current_tenant_id
+from app.core.database import reset_current_tenant_id, set_current_tenant_id
+from app.core.enums import UserRole
+
+# Context vars for request tracing
+_request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
-class TenantContextMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that intercepts all HTTP requests and inspects headers or JWT tokens
-    to resolve the request's active tenant. The resolved tenant ID is bound to
-    the request-scoped contextvar to enforce logical data isolation.
-    """
+def get_current_request_id() -> str | None:
+    return _request_id_ctx.get()
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        tenant_id = None
 
-        # 1. Attempt extraction from custom test/service-to-service header
-        tenant_header = request.headers.get("X-Tenant-ID")
-        if tenant_header:
-            try:
-                tenant_id = UUID(tenant_header)
-            except ValueError:
-                pass  # Invalid UUID format
+def set_current_request_id(request_id: str | None) -> Token[str | None]:
+    return _request_id_ctx.set(request_id)
 
-        # 2. Attempt extraction from JWT Authorization header
-        if not tenant_id:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                # Robust extraction of the Bearer token
-                parts = auth_header.split(" ", 1)
-                token = parts[1] if len(parts) > 1 else auth_header[7:]
-                try:
-                    payload = jwt.decode(
-                        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-                    )
-                    tenant_id_str = payload.get("tenant_id")
-                    if tenant_id_str:
-                        tenant_id = UUID(tenant_id_str)
-                except (jwt.PyJWTError, ValueError):
-                    # We do not block here; path-specific authentication dependencies
-                    # (like oauth2 schemes) will raise 401 Unauthorized if required.
-                    pass
 
-        # Set the thread-safe context variable
-        context_token = set_current_tenant_id(tenant_id)
+def reset_current_request_id(token: Token[str | None]) -> None:
+    _request_id_ctx.reset(token)
+
+
+@dataclass
+class AuthContext:
+    """Resolved user identity context from JWT."""
+
+    user_id: UUID
+    tenant_id: UUID
+    role: UserRole
+
+
+class RequestIdMiddleware:
+    """ASGI Middleware to trace requests with unique Correlation IDs."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        scope.setdefault("state", {})
+        headers = dict(scope.get("headers", []))
+
+        # Resolve or generate X-Request-ID
+        req_id_header = headers.get(b"x-request-id")
+        request_id = req_id_header.decode() if req_id_header else uuid.uuid4().hex
+        scope["state"]["request_id"] = request_id
+
+        # Inject to context var for log tracing
+        token = set_current_request_id(request_id)
+
+        # Inject X-Request-ID into response headers
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers_list = message.get("headers", [])
+                headers_list.append((b"x-request-id", request_id.encode()))
+                message["headers"] = headers_list
+            await send(message)
+
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send_wrapper)
         finally:
-            # Always reset context variable to prevent cross-request leakage
-            reset_current_tenant_id(context_token)
+            reset_current_request_id(token)
+
+
+class TenantAuthMiddleware:
+    """ASGI Middleware to resolve tenant context and enforce JWT security."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        scope.setdefault("state", {})
+        headers = dict(scope.get("headers", []))
+
+        # 1. Resolve Auth identity
+        identity = None
+        auth_header = headers.get(b"authorization")
+        if auth_header:
+            try:
+                scheme, token = auth_header.decode().split(" ", 1)
+                if scheme.lower() == "bearer":
+                    payload = jwt.decode(
+                        token,
+                        settings.JWT_SECRET,
+                        algorithms=[settings.JWT_ALGORITHM],
+                    )
+                    if payload.get("type") != "access":
+                        response = JSONResponse(
+                            status_code=401,
+                            content={"detail": "Invalid token type"},
+                        )
+                        await response(scope, receive, send)
+                        return
+                    identity = AuthContext(
+                        user_id=UUID(payload["sub"]),
+                        tenant_id=UUID(payload["tenant_id"]),
+                        role=UserRole(payload.get("role", UserRole.MEMBER)),
+                    )
+                    scope["state"]["identity"] = identity
+            except (ValueError, KeyError, jwt.PyJWTError):
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Could not validate credentials"},
+                )
+                await response(scope, receive, send)
+                return
+
+        # 2. Enforce Tenant safety (only trust JWT, ignore headers for anonymous requests)
+        tenant_id = None
+        if identity:
+            tenant_id = identity.tenant_id
+
+            # If client provides a tenant header, ensure it matches JWT
+            if tenant_header := headers.get(b"x-tenant-id"):
+                try:
+                    provided_tenant_id = UUID(tenant_header.decode())
+                    if identity.tenant_id != provided_tenant_id:
+                        response = JSONResponse(
+                            status_code=403,
+                            content={"detail": "Tenant context mismatch"},
+                        )
+                        await response(scope, receive, send)
+                        return
+                except ValueError:
+                    response = JSONResponse(
+                        status_code=400,
+                        content={"detail": "Invalid Tenant ID format"},
+                    )
+                    await response(scope, receive, send)
+                    return
+
+        # 3. Bind context and forward request
+        token = set_current_tenant_id(tenant_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_current_tenant_id(token)

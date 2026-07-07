@@ -24,12 +24,40 @@ celery_app.conf.update(
 )
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, max_retries=3)
 def parse_document_task(self, document_id: str) -> None:
     """Celery task running synchronous event loop to invoke async parsing logic."""
-    from app.modules.documents.services import process_document_ingestion
+    import botocore.exceptions
+    import sqlalchemy.exc
 
-    asyncio.run(process_document_ingestion(self, document_id))
+    from app.modules.documents.commands.ingest_document import (
+        mark_document_as_error,
+        run_ingestion,
+    )
+
+    try:
+        asyncio.run(run_ingestion(document_id))
+    except (
+        botocore.exceptions.BotoCoreError,
+        sqlalchemy.exc.OperationalError,
+        OSError,
+    ) as infra_err:
+        retry_count = self.request.retries
+        countdown = 2**retry_count
+        try:
+            raise self.retry(exc=infra_err, countdown=countdown)
+        except self.MaxRetriesExceededError:
+            # All retries exhausted: mark document as ERROR
+            asyncio.run(
+                mark_document_as_error(
+                    document_id,
+                    f"Infrastructure failure (retries exhausted): {str(infra_err)}",
+                )
+            )
+            raise infra_err
+    except Exception as logic_err:
+        # Non-infrastructure logical error: already handled inside usecase
+        raise logic_err
 
 
 @celery_app.task

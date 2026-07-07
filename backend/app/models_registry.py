@@ -1,7 +1,7 @@
 # Import the Base ORM structure
 from app.core.database import Base
 from app.modules.audit.models import AuditLog
-from app.modules.auth.models import User
+from app.modules.auth.models import Invitation, RefreshToken, User
 from app.modules.documents.models import Document, DocumentChunk, Workspace
 
 # Import all models to register their tables on the metadata object
@@ -15,6 +15,8 @@ __all__ = [
     "metadata",
     "Tenant",
     "User",
+    "RefreshToken",
+    "Invitation",
     "Document",
     "DocumentChunk",
     "Workspace",

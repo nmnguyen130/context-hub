@@ -1,52 +1,65 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, status
+import redis.asyncio as aioredis
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.middleware import TenantContextMiddleware
+# Setup Logging Early
+from app.core.logging import setup_logging
+
+setup_logging()
+
+from app.api.deps import get_db
+from app.api.middleware import RequestIdMiddleware, TenantAuthMiddleware
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import Database
+from app.core.exceptions import register_exception_handlers
+from app.core.limiter import LUA_SLIDING_WINDOW
+from app.core.storage import S3StorageProvider
 
 logger = logging.getLogger("app.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Initialize Redis Semantic Cache VSS index on startup
-    from app.modules.documents.semantic_cache import SemanticCacheManager
+    # Startup
+    app.state.db = Database(settings.DATABASE_URL)
+    app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
+    app.state.storage = S3StorageProvider()
 
-    cache_manager = SemanticCacheManager()
-    await cache_manager.ensure_index()
+    # Preload rate limiter Lua script
+    app.state.limiter_script = app.state.redis.register_script(LUA_SLIDING_WINDOW)
 
-    # 2. Startup Embedding Validation
+    try:
+        await app.state.storage.ensure_bucket_exists()
+    except Exception:
+        logger.warning("S3 bucket check failed on startup")
+
+    # Embedding dimension validation
     if settings.GEMINI_API_KEY:
-        from app.core.clients import GeminiEmbeddingClient
+        from app.infrastructure.clients import GeminiEmbeddingClient
         from app.modules.documents.models import DocumentChunk
 
-        # Dynamically resolve dimension from SQLAlchemy model type definition
         db_dim = DocumentChunk.embedding.type.dim
         try:
             client = GeminiEmbeddingClient()
             vector = await client.get_embedding("startup_validation")
-            returned_dim = len(vector)
-            if returned_dim != db_dim:
-                logger.critical(
-                    f"Startup embedding dimension MISMATCH! "
-                    f"Database expects {db_dim}, but API returned {returned_dim}."
-                )
-                raise ValueError("Embedding model dimension mismatch.")
-            logger.info(
-                f"Startup embedding validation passed. Dimension: {returned_dim}"
-            )
+            if (dim := len(vector)) != db_dim:
+                raise ValueError(f"Dimension mismatch: expected {db_dim}, got {dim}")
+            logger.info(f"Embedding validation passed (dim={db_dim})")
         except Exception as e:
-            logger.critical(f"Startup embedding validation FAILED: {str(e)}")
-            raise e
+            logger.critical(f"Embedding validation failed: {e}")
+            raise
 
     yield
+
+    # Teardown
+    await app.state.redis.aclose()
+    await app.state.db.dispose()
 
 
 app = FastAPI(
@@ -57,10 +70,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 1. CORS Configuration
+register_exception_handlers(app)
+
+# CORS Safety Validation
 origins = [
     origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()
 ]
+if "*" in origins:
+    if settings.ENVIRONMENT == "production":
+        raise ValueError(
+            "CORS allow_origins cannot contain '*' in production environment."
+        )
+    logger.warning(
+        "CORS allow_origins contains '*' with credentials enabled. This is insecure."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -69,34 +93,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Multi-Tenancy Isolation Middleware
-app.add_middleware(TenantContextMiddleware)
+
+# Multi-Tenancy Isolation & Tracing
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(TenantAuthMiddleware)
 
 
-# 3. Healthcheck Router
+# Healthcheck
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["System"])
-async def health_check(db: AsyncSession = Depends(get_db)):
-    """
-    Standard service health check endpoint.
-    Performs ping operations on PostgreSQL and Redis to verify connection viability.
-    """
+async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
+    """Service health check (pings Postgres and Redis)."""
     db_ok = False
     redis_ok = False
 
-    # Check Database connection
+    # Check Database
     try:
-        # Run a simple query utilizing the skip_tenant_filter execution option
-        # since it's a global ping and does not run in a tenant context.
         await db.execute(text("SELECT 1").execution_options(skip_tenant_filter=True))
         db_ok = True
     except Exception:
         pass
 
-    # Check Redis connection
+    # Check Redis
     try:
-        from app.core.redis import get_redis_client
-
-        redis_client = get_redis_client()
+        redis_client = request.app.state.redis
         await redis_client.ping()
         redis_ok = True
     except Exception:
@@ -114,7 +133,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     }
 
 
-# 4. API Core Router Registration
+# Routing
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 

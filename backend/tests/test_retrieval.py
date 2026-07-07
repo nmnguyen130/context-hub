@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.modules.chat.retrieval import retrieve_grounding_chunks
 from app.modules.documents.models import Document, DocumentChunk, Workspace
-from app.modules.documents.retrieval import retrieve_grounding_chunks
 from app.modules.tenant.models import Tenant
 
 
@@ -68,7 +68,8 @@ async def test_vietnamese_hybrid_search_retrieval(db: AsyncSession):
 
     # 4. Mock Gemini Embedding client to return [0.1] * 768 for our query
     with patch(
-        "app.core.clients.GeminiEmbeddingClient.get_embedding", return_value=[0.1] * 768
+        "app.infrastructure.clients.GeminiEmbeddingClient.get_embedding",
+        return_value=[0.1] * 768,
     ):
         # Query 1: Keywords matching chunk_a exactly (FTS trigger + Dense match)
         results = await retrieve_grounding_chunks(
@@ -96,7 +97,7 @@ async def test_vietnamese_hybrid_search_retrieval(db: AsyncSession):
                     return chunks
 
             with patch(
-                "app.modules.documents.retrieval.get_reranker",
+                "app.modules.chat.retrieval.get_reranker",
                 return_value=LowScoreReranker(),
             ):
                 results_gated = await retrieve_grounding_chunks(
@@ -109,7 +110,7 @@ async def test_vietnamese_hybrid_search_retrieval(db: AsyncSession):
 @pytest.mark.asyncio
 async def test_context_boost_reranker():
     """Verify that ContextBoostReranker ranks metadata-matching chunks higher at zero cost."""
-    from app.modules.documents.rerankers import ContextBoostReranker
+    from app.modules.chat.rerankers import ContextBoostReranker
 
     reranker = ContextBoostReranker()
     query = "database schema design"

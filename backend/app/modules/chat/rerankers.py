@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from app.core.clients import CohereRerankClient
 from app.core.config import settings
+from app.infrastructure.clients import CohereRerankClient
 
 logger = logging.getLogger(__name__)
 

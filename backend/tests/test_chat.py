@@ -58,11 +58,11 @@ async def test_chat_stream_flow(client: AsyncClient, db: AsyncSession):
     req_payload["workspace_id"] = str(workspace_a.id)
 
     with patch(
-        "app.core.clients.GeminiEmbeddingClient.get_embedding",
+        "app.infrastructure.clients.GeminiEmbeddingClient.get_embedding",
         return_value=[0.1] * 768,
     ):
         with patch(
-            "app.modules.documents.semantic_cache.SemanticCacheManager.get",
+            "app.modules.chat.semantic_cache.SemanticCacheManager.get",
             return_value="Cached: Multi-tenancy is logical.",
         ) as mock_get:
             response = await client.post(
@@ -99,23 +99,23 @@ async def test_chat_stream_flow(client: AsyncClient, db: AsyncSession):
         yield f"tenant_id column partitioning [^[{chunk_id}]]."
 
     with patch(
-        "app.core.clients.GeminiEmbeddingClient.get_embedding",
+        "app.infrastructure.clients.GeminiEmbeddingClient.get_embedding",
         return_value=[0.1] * 768,
     ):
         with patch(
-            "app.modules.documents.semantic_cache.SemanticCacheManager.get",
+            "app.modules.chat.semantic_cache.SemanticCacheManager.get",
             return_value=None,
         ):
             with patch(
-                "app.modules.documents.chat_router.retrieve_grounding_chunks",
+                "app.modules.chat.queries.stream_chat.retrieve_grounding_chunks",
                 return_value=mock_chunks,
             ):
                 with patch(
-                    "app.core.clients.GeminiChatClient.stream_chat",
+                    "app.infrastructure.clients.GeminiChatClient.stream_chat",
                     side_effect=mock_stream_chat,
                 ):
                     with patch(
-                        "app.modules.documents.semantic_cache.SemanticCacheManager.set",
+                        "app.modules.chat.semantic_cache.SemanticCacheManager.set",
                         new_callable=AsyncMock,
                     ) as mock_set:
                         response = await client.post(

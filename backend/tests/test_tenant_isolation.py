@@ -1,131 +1,90 @@
 import pytest
-from sqlalchemy import delete, select, update
+from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.tenant_context import reset_current_tenant_id, set_current_tenant_id
-from app.modules.documents.models import Workspace
+from app.core.enums import UserRole
+from app.modules.auth.models import User
 from app.modules.tenant.models import Tenant
 
 
 @pytest.mark.asyncio
-async def test_tenant_query_isolation(db: AsyncSession):
-    # 1. Create two tenants
-    tenant_a = Tenant(name="Tenant A", plan_tier="Enterprise")
-    tenant_b = Tenant(name="Tenant B", plan_tier="Starter")
-    db.add_all([tenant_a, tenant_b])
-    await db.commit()
+async def test_multi_tenant_isolation(client: AsyncClient, db: AsyncSession):
+    # 1. Register Tenant A
+    reg_a = {
+        "email": "admin@tenant-a.com",
+        "password": "password123",
+        "first_name": "Admin",
+        "last_name": "A",
+        "tenant_name": "Tenant A Org",
+    }
+    resp_a = await client.post("/api/v1/auth/register", json=reg_a)
+    assert resp_a.status_code == 201
+    tenant_a_id = resp_a.json()["tenant_id"]
 
-    # 2. Add workspaces for both tenants under their respective contexts
-    token_a = set_current_tenant_id(tenant_a.id)
-    workspace_a = Workspace(name="Workspace A")
-    db.add(workspace_a)
-    await db.commit()
-    reset_current_tenant_id(token_a)
+    # 2. Register Tenant B
+    reg_b = {
+        "email": "admin@tenant-b.com",
+        "password": "password123",
+        "first_name": "Admin",
+        "last_name": "B",
+        "tenant_name": "Tenant B Org",
+    }
+    resp_b = await client.post("/api/v1/auth/register", json=reg_b)
+    assert resp_b.status_code == 201
+    tenant_b_id = resp_b.json()["tenant_id"]
 
-    token_b = set_current_tenant_id(tenant_b.id)
-    workspace_b = Workspace(name="Workspace B")
-    db.add(workspace_b)
-    await db.commit()
-    reset_current_tenant_id(token_b)
+    # 3. Log in as Tenant A
+    login_a_resp = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "admin@tenant-a.com",
+            "password": "password123",
+            "tenant_slug": "tenant-a-org",
+        },
+    )
+    assert login_a_resp.status_code == 200
+    token_a = login_a_resp.json()["access_token"]
+    headers_a = {"Authorization": f"Bearer {token_a}"}
 
-    # 3. Test SELECT isolation under Tenant A context
-    token = set_current_tenant_id(tenant_a.id)
-    try:
-        stmt = select(Workspace)
-        result = await db.execute(stmt)
-        workspaces = result.scalars().all()
+    # 4. Log in as Tenant B
+    login_b_resp = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "admin@tenant-b.com",
+            "password": "password123",
+            "tenant_slug": "tenant-b-org",
+        },
+    )
+    assert login_b_resp.status_code == 200
+    token_b = login_b_resp.json()["access_token"]
+    headers_b = {"Authorization": f"Bearer {token_b}"}
 
-        # Should ONLY return Workspace A
-        assert len(workspaces) == 1
-        assert workspaces[0].name == "Workspace A"
-        assert workspaces[0].tenant_id == tenant_a.id
-    finally:
-        reset_current_tenant_id(token)
+    # 5. Verify Tenant A admin cannot fetch users from Tenant B
+    # Get Tenant B admin user ID
+    user_b_stmt = (
+        select(User)
+        .where(User.email == "admin@tenant-b.com")
+        .execution_options(skip_tenant_filter=True)
+    )
+    user_b = (await db.execute(user_b_stmt)).scalar_one()
 
-    # 4. Test SELECT isolation under Tenant B context
-    token = set_current_tenant_id(tenant_b.id)
-    try:
-        stmt = select(Workspace)
-        result = await db.execute(stmt)
-        workspaces = result.scalars().all()
+    # Try to access Tenant B user using Tenant A's token
+    hack_resp = await client.get(f"/api/v1/users/{user_b.id}", headers=headers_a)
+    # The default tenant loader criteria handles filtering, meaning Tenant A's query
+    # will result in user not found (404) or forbidden since it cannot see Tenant B's row.
+    assert hack_resp.status_code == 404
 
-        # Should ONLY return Workspace B
-        assert len(workspaces) == 1
-        assert workspaces[0].name == "Workspace B"
-        assert workspaces[0].tenant_id == tenant_b.id
-    finally:
-        reset_current_tenant_id(token)
+    # 6. Verify Tenant A admin lists users and only sees Tenant A users
+    list_a_resp = await client.get("/api/v1/users", headers=headers_a)
+    assert list_a_resp.status_code == 200
+    list_a_data = list_a_resp.json()
+    assert list_a_data["total"] == 1
+    assert list_a_data["users"][0]["email"] == "admin@tenant-a.com"
 
-    # 5. Test bypass filter using skip_tenant_filter execution option
-    token = set_current_tenant_id(tenant_a.id)
-    try:
-        stmt = select(Workspace).execution_options(skip_tenant_filter=True)
-        result = await db.execute(stmt)
-        workspaces = result.scalars().all()
-
-        # Should return both workspaces
-        names = [w.name for w in workspaces]
-        assert "Workspace A" in names
-        assert "Workspace B" in names
-    finally:
-        reset_current_tenant_id(token)
-
-
-@pytest.mark.asyncio
-async def test_tenant_update_delete_isolation(db: AsyncSession):
-    tenant_a = Tenant(name="Tenant A")
-    tenant_b = Tenant(name="Tenant B")
-    db.add_all([tenant_a, tenant_b])
-    await db.commit()
-
-    # Create workspace in Tenant A
-    token_a = set_current_tenant_id(tenant_a.id)
-    workspace_a = Workspace(name="Original A")
-    db.add(workspace_a)
-    await db.commit()
-    reset_current_tenant_id(token_a)
-
-    # Attempt to update Workspace A under Tenant B context
-    token_b = set_current_tenant_id(tenant_b.id)
-    try:
-        stmt = (
-            update(Workspace)
-            .where(Workspace.id == workspace_a.id)
-            .values(name="Hacked")
-        )
-        result = await db.execute(stmt)
-        await db.commit()
-        # Since the filter is appended (tenant_id == tenant_b.id), no rows should be updated!
-        assert result.rowcount == 0
-    finally:
-        reset_current_tenant_id(token_b)
-
-    # Verify Workspace A remains unchanged
-    token_a = set_current_tenant_id(tenant_a.id)
-    try:
-        stmt = select(Workspace).where(Workspace.id == workspace_a.id)
-        res = await db.execute(stmt)
-        w = res.scalar_one()
-        assert w.name == "Original A"
-    finally:
-        reset_current_tenant_id(token_a)
-
-    # Attempt to delete Workspace A under Tenant B context
-    token_b = set_current_tenant_id(tenant_b.id)
-    try:
-        stmt = delete(Workspace).where(Workspace.id == workspace_a.id)
-        result = await db.execute(stmt)
-        await db.commit()
-        # No rows should be deleted
-        assert result.rowcount == 0
-    finally:
-        reset_current_tenant_id(token_b)
-
-    # Verify Workspace A still exists
-    token_a = set_current_tenant_id(tenant_a.id)
-    try:
-        stmt = select(Workspace).where(Workspace.id == workspace_a.id)
-        res = await db.execute(stmt)
-        assert res.scalar_one_or_none() is not None
-    finally:
-        reset_current_tenant_id(token_a)
+    # Verify Tenant B admin lists users and only sees Tenant B users
+    list_b_resp = await client.get("/api/v1/users", headers=headers_b)
+    assert list_b_resp.status_code == 200
+    list_b_data = list_b_resp.json()
+    assert list_b_data["total"] == 1
+    assert list_b_data["users"][0]["email"] == "admin@tenant-b.com"

@@ -7,12 +7,13 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.core.storage as storage_module
+from app.api.deps import get_storage
 from app.core.security import create_access_token
 from app.core.storage import StorageProvider
+from app.main import app
 from app.modules.auth.models import User
+from app.modules.documents.commands.ingest_document import run_ingestion
 from app.modules.documents.models import Document, Workspace
-from app.modules.documents.services import process_document_ingestion
 from app.modules.tenant.models import Tenant
 from app.worker.tasks import parse_document_task
 
@@ -35,9 +36,17 @@ class MemoryStorageProvider(StorageProvider):
             del self.storage[key]
 
 
-# Instantiate and patch S3StorageProvider globally in the storage module
+# Override get_storage dependency with our memory storage provider
 mem_storage = MemoryStorageProvider()
-storage_module._storage_client = mem_storage
+
+
+@pytest.fixture(autouse=True)
+def setup_storage():
+    app.state.storage = mem_storage
+    import app.modules.documents.commands.ingest_document as ingest_module
+
+    ingest_module._worker_storage = mem_storage
+    yield
 
 
 @pytest.mark.asyncio
@@ -126,10 +135,10 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
         # Run Celery parsing task synchronously
         mock_delay.assert_called_once_with(doc_id)
         with patch(
-            "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+            "app.infrastructure.clients.GeminiEmbeddingClient.get_embeddings_batch",
             side_effect=lambda texts: [[0.1] * 768 for _ in texts],
         ):
-            await process_document_ingestion(parse_document_task, doc_id)
+            await run_ingestion(doc_id)
 
     # Verify document status updated to ACTIVE in DB
     db.expire_all()
@@ -163,10 +172,10 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
 
         # Run Celery parsing task synchronously
         with patch(
-            "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+            "app.infrastructure.clients.GeminiEmbeddingClient.get_embeddings_batch",
             side_effect=lambda texts: [[0.1] * 768 for _ in texts],
         ):
-            await process_document_ingestion(parse_document_task, pdf_doc_id)
+            await run_ingestion(pdf_doc_id)
 
     db.expire_all()
     stmt = select(Document).where(Document.id == uuid.UUID(pdf_doc_id))
@@ -215,10 +224,10 @@ async def test_document_ingestion_lifecycle(client: AsyncClient, db: AsyncSessio
         # Run worker (it should raise Exception during parsing and transition doc to ERROR)
         with pytest.raises(Exception):
             with patch(
-                "app.core.clients.GeminiEmbeddingClient.get_embeddings_batch",
+                "app.infrastructure.clients.GeminiEmbeddingClient.get_embeddings_batch",
                 side_effect=lambda texts: [[0.1] * 768 for _ in texts],
             ):
-                await process_document_ingestion(parse_document_task, corrupt_doc_id)
+                await run_ingestion(corrupt_doc_id)
 
     db.expire_all()
     stmt = select(Document).where(Document.id == uuid.UUID(corrupt_doc_id))
@@ -289,5 +298,6 @@ async def test_document_upload_size_limit(client: AsyncClient, db: AsyncSession)
         files=files,
         headers=headers,
     )
+    print("RESPONSE BODY:", response.json())
     assert response.status_code == 400
     assert "exceeds the limit" in response.json()["detail"]

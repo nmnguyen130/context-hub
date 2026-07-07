@@ -6,8 +6,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.api.deps import get_db
 from app.core.config import settings
-from app.core.database import get_db
 from app.main import app
 
 # Create a test-specific engine using NullPool to prevent connection caching
@@ -21,7 +21,7 @@ async def clean_database() -> None:
     async with test_engine.begin() as conn:
         await conn.execute(
             text(
-                "TRUNCATE TABLE document_chunks, documents, audit_logs, workspaces, users, tenants CASCADE;"
+                "TRUNCATE TABLE document_chunks, documents, audit_logs, workspaces, users, tenants, refresh_tokens, invitations CASCADE;"
             )
         )
 
@@ -38,8 +38,21 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Yields an HTTPX AsyncClient with overridden db session dependency."""
 
-    def override_get_db():
+    async def override_get_db():
         yield db
+
+    if not hasattr(app.state, "db"):
+        from app.core.database import Database
+
+        app.state.db = Database(settings.DATABASE_URL)
+    if not hasattr(app.state, "redis"):
+        import redis.asyncio as aioredis
+
+        app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
+    if not hasattr(app.state, "storage"):
+        from app.core.storage import S3StorageProvider
+
+        app.state.storage = S3StorageProvider()
 
     app.dependency_overrides[get_db] = override_get_db
 

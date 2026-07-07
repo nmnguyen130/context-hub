@@ -4,11 +4,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Standard robust email regex pattern
-EMAIL_REGEX = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+EMAIL_REGEX = r"^[\w\.\+\-]+@[\w\.\-]+\.\w+$"
 
 
-class AuthBase(BaseModel):
+# ============================================================
+# Base
+# ============================================================
+class _EmailMixin(BaseModel):
     email: str = Field(..., max_length=255)
 
     @field_validator("email")
@@ -20,8 +22,11 @@ class AuthBase(BaseModel):
         return v
 
 
-class UserRegister(AuthBase):
-    """Schema for registering a new tenant organization and its Administrator user."""
+# ============================================================
+# Registration
+# ============================================================
+class RegisterRequest(_EmailMixin):
+    """Register a new tenant organization + admin user."""
 
     password: str = Field(..., min_length=8, max_length=72)
     first_name: str | None = Field(default=None, max_length=100)
@@ -37,37 +42,85 @@ class UserRegister(AuthBase):
         return v
 
 
-class UserJoin(AuthBase):
-    """Schema for an employee registering to join an existing tenant using a signed invite token."""
+class JoinRequest(_EmailMixin):
+    """Join an existing tenant via invitation token."""
 
     password: str = Field(..., min_length=8, max_length=72)
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
-    invite_token: str = Field(...)
+    invite_token: str
 
 
-class UserLogin(AuthBase):
-    """Schema for local credentials login."""
+# ============================================================
+# Authentication
+# ============================================================
+class LoginRequest(_EmailMixin):
+    """Login with email + password + tenant slug."""
 
     password: str = Field(..., min_length=1, max_length=72)
+    tenant_slug: str = Field(..., min_length=1, max_length=255)
 
 
-class Token(BaseModel):
-    """Response schema containing access token and token type."""
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
+
+class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    expires_in: int  # seconds until access token expiry
 
 
+# ============================================================
+# Invitations
+# ============================================================
+class InviteCreateRequest(_EmailMixin):
+    role: str = Field(default="MEMBER", pattern="^(MEMBER|VIEWER)$")
+
+
+class InviteResponse(BaseModel):
+    id: UUID
+    email: str
+    role: str
+    status: str
+    invited_by: UUID | None
+    expires_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================================
+# User Management
+# ============================================================
 class UserResponse(BaseModel):
-    """Public user profile serialization schema."""
-
     id: UUID
     email: str
     first_name: str | None
     last_name: str | None
     role: str
+    is_active: bool
     tenant_id: UUID
+    last_login_at: datetime | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserUpdateRequest(BaseModel):
+    """Self-service profile update."""
+
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+
+
+class UserRoleUpdateRequest(BaseModel):
+    """Admin-only role change."""
+
+    role: str = Field(..., pattern="^(ADMIN|MEMBER|VIEWER)$")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=72)
+    new_password: str = Field(..., min_length=8, max_length=72)

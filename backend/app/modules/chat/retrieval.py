@@ -5,11 +5,11 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clients import GeminiEmbeddingClient
 from app.core.config import settings
 from app.core.text_utils import normalize_text
+from app.infrastructure.clients import GeminiEmbeddingClient
+from app.modules.chat.rerankers import get_reranker
 from app.modules.documents.models import DocumentChunk
-from app.modules.documents.rerankers import get_reranker
 
 logger = logging.getLogger(__name__)
 
