@@ -1,15 +1,16 @@
-from typing import AsyncGenerator
-
+from typing import AsyncGenerator, AsyncIterator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.middleware import AuthContext
 from app.core.config import settings
 from app.core.enums import UserRole
 from app.infrastructure.container import RAGContainer
 from app.modules.auth.models import User
+from app.core.context import current_context, RequestContext
+from app.core.uow import UnitOfWork
+from app.core.event_bus import event_bus
 
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
@@ -17,6 +18,19 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     async with request.app.state.db.session_factory() as session:
         async with session.begin():
             yield session
+
+
+async def get_uow(request: Request) -> AsyncIterator[UnitOfWork]:
+    """Provides request-scoped Unit of Work."""
+    context = current_context()
+    db_manager = request.app.state.db
+    async with UnitOfWork(
+        session_factory=db_manager.session_factory,
+        context=context,
+        event_bus=event_bus,
+        admin_session_factory=db_manager.admin_session_factory,
+    ) as uow:
+        yield uow
 
 
 def get_infra(request: Request, db: AsyncSession = Depends(get_db)) -> RAGContainer:
@@ -34,28 +48,33 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 
 async def get_auth_context(
-    request: Request,
     token: str = Depends(oauth2_scheme),
-) -> AuthContext:
-    """Retrieves the pre-resolved stateless authentication context from request state."""
-    identity = getattr(request.state, "identity", None)
-    if not identity:
+) -> RequestContext:
+    """Retrieves the pre-resolved stateless authentication context from unified RequestContext."""
+    try:
+        ctx = current_context()
+        if not ctx.actor_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return ctx
+    except RuntimeError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return identity
+            detail="Request context not bound",
+        ) from e
 
 
 async def get_current_user(
-    auth_ctx: AuthContext = Depends(get_auth_context),
+    auth_ctx: RequestContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Returns the authenticated User by fetching from the database."""
     # Ensure User query is scoped to their tenant via default criteria or manual filter
     # But since it's global email check, let's load it directly.
-    stmt = select(User).where(User.id == auth_ctx.user_id)
+    stmt = select(User).where(User.id == auth_ctx.actor_id)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user:

@@ -1,64 +1,71 @@
-from typing import AsyncGenerator
-
+# tests/conftest.py
+import asyncio
+import uuid
+import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import NullPool
-
-from app.api.deps import get_db
-from app.core.config import settings
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.main import app
-
-# Create a test-specific engine using NullPool to prevent connection caching
-# across different asyncio event loops during test execution.
-test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def clean_database() -> None:
-    """Automatically truncates all tables before each test to guarantee database freshness."""
-    async with test_engine.begin() as conn:
-        await conn.execute(
-            text(
-                "TRUNCATE TABLE document_chunks, documents, audit_logs, workspaces, users, tenants, refresh_tokens, invitations CASCADE;"
-            )
-        )
-
+from app.api.deps import get_db, get_uow
+from app.core.config import settings
+from app.core.context import RequestContext, bind_context
+from app.core.enums import UserRole
+from app.core.uow import UnitOfWork
+from app.core.event_bus import event_bus
 
 @pytest_asyncio.fixture
-async def db() -> AsyncGenerator[AsyncSession, None]:
-    """Yields a database session and rolls back transactions after each test."""
-    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+async def test_engine():
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    yield engine
+    await engine.dispose()
+
+@pytest_asyncio.fixture
+async def db_session(test_engine):
+    session_factory = async_sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False
+    )
+    async with session_factory() as session:
+        # Start a nested transaction (savepoint) so we can roll back all writes
+        await session.begin()
         yield session
         await session.rollback()
 
+@pytest_asyncio.fixture
+async def test_uow(db_session):
+    context = RequestContext(
+        request_id="test_req",
+        correlation_id="test_corr",
+        tenant_id=uuid.uuid4(),
+        actor_id=uuid.uuid4(),
+        role=UserRole.ADMIN,
+        is_platform_admin=True
+    )
+    
+    # We create a dummy session factory that always returns our db_session
+    class DummySessionFactory:
+        def __call__(self):
+            return db_session
+            
+    uow = UnitOfWork(
+        session_factory=DummySessionFactory(),
+        context=context,
+        event_bus=event_bus,
+        admin_session_factory=DummySessionFactory()
+    )
+    # Bind context for the duration of the test
+    with bind_context(context):
+        yield uow
 
 @pytest_asyncio.fixture
-async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """Yields an HTTPX AsyncClient with overridden db session dependency."""
-
-    async def override_get_db():
-        yield db
-
-    if not hasattr(app.state, "db"):
-        from app.core.database import Database
-
-        app.state.db = Database(settings.DATABASE_URL)
-    if not hasattr(app.state, "redis"):
-        import redis.asyncio as aioredis
-
-        app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
-    if not hasattr(app.state, "storage"):
-        from app.core.storage import S3StorageProvider
-
-        app.state.storage = S3StorageProvider()
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as ac:
+async def client(db_session, test_uow):
+    # Override get_db and get_uow to return our test database session and UoW
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_uow] = lambda: test_uow
+    
+    async with AsyncClient(app=app, base_url="http://testserver") as ac:
         yield ac
-
+        
     app.dependency_overrides.clear()

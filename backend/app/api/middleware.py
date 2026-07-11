@@ -1,43 +1,15 @@
+# app/api/middleware.py
 import uuid
-from contextvars import ContextVar, Token
-from dataclasses import dataclass
-from uuid import UUID
-
 import jwt
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import settings
-from app.core.database import reset_current_tenant_id, set_current_tenant_id
+from app.core.context import RequestContext, bind_context
 from app.core.enums import UserRole
 
-# Context vars for request tracing
-_request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
-
-
-def get_current_request_id() -> str | None:
-    return _request_id_ctx.get()
-
-
-def set_current_request_id(request_id: str | None) -> Token[str | None]:
-    return _request_id_ctx.set(request_id)
-
-
-def reset_current_request_id(token: Token[str | None]) -> None:
-    _request_id_ctx.reset(token)
-
-
-@dataclass
-class AuthContext:
-    """Resolved user identity context from JWT."""
-
-    user_id: UUID
-    tenant_id: UUID
-    role: UserRole
-
-
-class RequestIdMiddleware:
-    """ASGI Middleware to trace requests with unique Correlation IDs."""
+class RequestContextMiddleware:
+    """ASGI Middleware to trace requests and resolve tenant context using a unified RequestContext."""
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -50,44 +22,21 @@ class RequestIdMiddleware:
         scope.setdefault("state", {})
         headers = dict(scope.get("headers", []))
 
-        # Resolve or generate X-Request-ID
+        # 1. Resolve or generate Request and Correlation IDs
         req_id_header = headers.get(b"x-request-id")
         request_id = req_id_header.decode() if req_id_header else uuid.uuid4().hex
+        
+        corr_id_header = headers.get(b"x-correlation-id")
+        correlation_id = corr_id_header.decode() if corr_id_header else request_id
+
         scope["state"]["request_id"] = request_id
 
-        # Inject to context var for log tracing
-        token = set_current_request_id(request_id)
+        # 2. Resolve Auth identity (JWT decode, spoofing checks)
+        tenant_id = None
+        actor_id = None
+        role = None
+        is_platform_admin = False
 
-        # Inject X-Request-ID into response headers
-        async def send_wrapper(message):
-            if message["type"] == "http.response.start":
-                headers_list = message.get("headers", [])
-                headers_list.append((b"x-request-id", request_id.encode()))
-                message["headers"] = headers_list
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            reset_current_request_id(token)
-
-
-class TenantAuthMiddleware:
-    """ASGI Middleware to resolve tenant context and enforce JWT security."""
-
-    def __init__(self, app: ASGIApp):
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)
-            return
-
-        scope.setdefault("state", {})
-        headers = dict(scope.get("headers", []))
-
-        # 1. Resolve Auth identity
-        identity = None
         auth_header = headers.get(b"authorization")
         if auth_header:
             try:
@@ -105,12 +54,26 @@ class TenantAuthMiddleware:
                         )
                         await response(scope, receive, send)
                         return
-                    identity = AuthContext(
-                        user_id=UUID(payload["sub"]),
-                        tenant_id=UUID(payload["tenant_id"]),
-                        role=UserRole(payload.get("role", UserRole.MEMBER)),
+
+                    actor_id = uuid.UUID(payload["sub"])
+                    tenant_id = uuid.UUID(payload["tenant_id"])
+                    role = UserRole(payload.get("role", UserRole.MEMBER.value))
+                    is_platform_admin = (role == UserRole.ADMIN)
+
+                    # Store identity on scope for compatibility
+                    from dataclasses import dataclass
+                    @dataclass
+                    class CompatibilityIdentity:
+                        user_id: uuid.UUID
+                        tenant_id: uuid.UUID
+                        role: UserRole
+
+                    scope["state"]["identity"] = CompatibilityIdentity(
+                        user_id=actor_id,
+                        tenant_id=tenant_id,
+                        role=role
                     )
-                    scope["state"]["identity"] = identity
+
             except (ValueError, KeyError, jwt.PyJWTError):
                 response = JSONResponse(
                     status_code=401,
@@ -119,33 +82,48 @@ class TenantAuthMiddleware:
                 await response(scope, receive, send)
                 return
 
-        # 2. Enforce Tenant safety (only trust JWT, ignore headers for anonymous requests)
-        tenant_id = None
-        if identity:
-            tenant_id = identity.tenant_id
-
-            # If client provides a tenant header, ensure it matches JWT
-            if tenant_header := headers.get(b"x-tenant-id"):
-                try:
-                    provided_tenant_id = UUID(tenant_header.decode())
-                    if identity.tenant_id != provided_tenant_id:
-                        response = JSONResponse(
-                            status_code=403,
-                            content={"detail": "Tenant context mismatch"},
-                        )
-                        await response(scope, receive, send)
-                        return
-                except ValueError:
+        # 3. If client provides a tenant header, ensure it matches JWT
+        if tenant_id and (tenant_header := headers.get(b"x-tenant-id")):
+            try:
+                provided_tenant_id = uuid.UUID(tenant_header.decode())
+                if tenant_id != provided_tenant_id:
                     response = JSONResponse(
-                        status_code=400,
-                        content={"detail": "Invalid Tenant ID format"},
+                        status_code=403,
+                        content={"detail": "Tenant context mismatch"},
                     )
                     await response(scope, receive, send)
                     return
+            except ValueError:
+                response = JSONResponse(
+                    status_code=400,
+                    content={"detail": "Invalid Tenant ID format"},
+                )
+                await response(scope, receive, send)
+                return
 
-        # 3. Bind context and forward request
-        token = set_current_tenant_id(tenant_id)
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            reset_current_tenant_id(token)
+        # 4. Construct unified RequestContext
+        client_host = scope.get("client", (None,))[0]
+        user_agent = headers.get(b"user-agent", b"").decode() or None
+
+        ctx = RequestContext(
+            request_id=request_id,
+            correlation_id=correlation_id,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            role=role,
+            is_platform_admin=is_platform_admin,
+            ip_address=client_host,
+            user_agent=user_agent,
+        )
+
+        # 5. Bind context and forward request
+        with bind_context(ctx):
+            async def send_wrapper(message):
+                if message["type"] == "http.response.start":
+                    headers_list = message.get("headers", [])
+                    headers_list.append((b"x-request-id", request_id.encode()))
+                    headers_list.append((b"x-correlation-id", correlation_id.encode()))
+                    message["headers"] = headers_list
+                await send(message)
+
+            await self.app(scope, receive, send_wrapper)

@@ -2,24 +2,25 @@
 import io
 import logging
 import uuid
-
 import sqlalchemy.exc
 from sqlalchemy import delete, func, select
-
 from app.core.config import settings
 from app.core.database import Database
 from app.core.exceptions import ServiceError
 from app.core.storage import S3StorageProvider
+from app.core.uow import UnitOfWork
+from app.core.context import current_context
+from app.core.event_bus import event_bus
 from app.infrastructure.clients import GeminiEmbeddingClient
 from app.modules.documents.chunkers import MarkdownStructureChunker
 from app.modules.documents.models import Document, DocumentChunk, Workspace
 from app.modules.documents.parsers import parser_registry
+from app.modules.documents.repository import DocumentRepository, WorkspaceRepository, DocumentChunkRepository
 
 logger = logging.getLogger(__name__)
 
 _worker_db = None
 _worker_storage = None
-
 
 def get_worker_db() -> Database:
     """Lazy initializer for worker-scoped database engine."""
@@ -28,7 +29,6 @@ def get_worker_db() -> Database:
         _worker_db = Database(settings.DATABASE_URL)
     return _worker_db
 
-
 def get_worker_storage():
     """Lazy initializer for worker-scoped storage provider."""
     global _worker_storage
@@ -36,23 +36,23 @@ def get_worker_storage():
         _worker_storage = S3StorageProvider()
     return _worker_storage
 
-
 async def run_ingestion(document_id: str) -> None:
     """
     Ingestion Pipeline UseCase.
     Downloads raw document, parses, chunks, generates embeddings, and saves to database.
     """
-    db_factory = get_worker_db().session_factory
+    db_manager = get_worker_db()
     storage = get_worker_storage()
+    context = current_context()
 
-    async with db_factory() as db:
-        # 1. Fetch document bypassing tenant filters in Celery worker context
-        stmt = (
-            select(Document)
-            .where(Document.id == uuid.UUID(document_id))
-            .execution_options(skip_tenant_filter=True)
-        )
-        doc = (await db.execute(stmt)).scalar_one_or_none()
+    async with UnitOfWork(
+        session_factory=db_manager.session_factory,
+        context=context,
+        event_bus=event_bus,
+        admin_session_factory=db_manager.admin_session_factory,
+    ) as uow:
+        doc_repo = uow.repo(DocumentRepository)
+        doc = await doc_repo.get(uuid.UUID(document_id))
         if not doc:
             raise ServiceError(
                 f"Document {document_id} not found in database.", status_code=404
@@ -61,8 +61,19 @@ async def run_ingestion(document_id: str) -> None:
         # 2. Update status to PARSING
         doc.status = "PARSING"
         doc.error_message = None
-        await db.commit()
-        await db.refresh(doc)
+        await uow.commit()
+
+    # Re-open a fresh UoW for the parsing/chunking work (decoupled transactions)
+    async with UnitOfWork(
+        session_factory=db_manager.session_factory,
+        context=context,
+        event_bus=event_bus,
+        admin_session_factory=db_manager.admin_session_factory,
+    ) as uow:
+        doc_repo = uow.repo(DocumentRepository)
+        doc = await doc_repo.get(uuid.UUID(document_id))
+        if not doc:
+            raise ServiceError("Document not found during parsing stage", status_code=404)
 
         try:
             # 3. Download raw bytes
@@ -82,17 +93,13 @@ async def run_ingestion(document_id: str) -> None:
             delete_stmt = delete(DocumentChunk).where(
                 DocumentChunk.document_id == doc.id
             )
-            await db.execute(delete_stmt)
+            await uow.session.execute(delete_stmt)
 
             # 7. Resolve DLP configuration
             dlp_action = settings.RAG_DLP_ACTION
             if doc.workspace_id:
-                w_stmt = (
-                    select(Workspace)
-                    .where(Workspace.id == doc.workspace_id)
-                    .execution_options(skip_tenant_filter=True)
-                )
-                workspace = (await db.execute(w_stmt)).scalar_one_or_none()
+                ws_repo = uow.repo(WorkspaceRepository)
+                workspace = await ws_repo.get(doc.workspace_id)
                 if workspace:
                     dlp_action = getattr(
                         workspace, "dlp_action", settings.RAG_DLP_ACTION
@@ -114,6 +121,7 @@ async def run_ingestion(document_id: str) -> None:
 
                 # 10. Save chunks to DB
                 chunk_objects = []
+                chunk_repo = uow.repo(DocumentChunkRepository)
                 for chunk, vector in zip(chunks, vectors):
                     chunk_obj = DocumentChunk(
                         document_id=doc.id,
@@ -127,14 +135,13 @@ async def run_ingestion(document_id: str) -> None:
                     )
                     chunk_objects.append(chunk_obj)
 
-                db.add_all(chunk_objects)
+                await chunk_repo.add_all(chunk_objects)
 
             # 11. Update status to ACTIVE
             doc.status = "ACTIVE"
-            await db.commit()
+            await uow.commit()
 
         except (sqlalchemy.exc.OperationalError, OSError) as infra_err:
-            await db.rollback()
             # Bubble up infrastructure errors to Celery for retries
             raise infra_err
         except Exception as logic_err:
@@ -145,28 +152,27 @@ async def run_ingestion(document_id: str) -> None:
                 logic_err,
                 (botocore.exceptions.BotoCoreError, boto3.exceptions.Boto3Error),
             ):
-                await db.rollback()
                 raise logic_err
 
-            await db.rollback()
             # Logical exception: mark status as ERROR immediately and commit status change
             doc.status = "ERROR"
             doc.error_message = f"Parsing failed: {str(logic_err)}"[:255]
-            await db.commit()
+            await uow.commit()
             raise logic_err
-
 
 async def mark_document_as_error(document_id: str, error_message: str) -> None:
     """Helper called by worker when retries are exhausted."""
-    db_factory = get_worker_db().session_factory
-    async with db_factory() as db:
-        stmt = (
-            select(Document)
-            .where(Document.id == uuid.UUID(document_id))
-            .execution_options(skip_tenant_filter=True)
-        )
-        doc = (await db.execute(stmt)).scalar_one_or_none()
+    db_manager = get_worker_db()
+    context = current_context()
+    async with UnitOfWork(
+        session_factory=db_manager.session_factory,
+        context=context,
+        event_bus=event_bus,
+        admin_session_factory=db_manager.admin_session_factory,
+    ) as uow:
+        doc_repo = uow.repo(DocumentRepository)
+        doc = await doc_repo.get(uuid.UUID(document_id))
         if doc:
             doc.status = "ERROR"
             doc.error_message = error_message[:255]
-            await db.commit()
+            await uow.commit()

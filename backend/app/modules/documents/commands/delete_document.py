@@ -1,44 +1,23 @@
+# app/modules/documents/commands/delete_document.py
 import uuid
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.exceptions import ServiceError
 from app.core.storage import StorageProvider
-from app.modules.documents.models import Document
-
+from app.core.uow import UnitOfWork
+from app.modules.documents.repository import DocumentRepository
+from app.core.events import DomainEvent
 
 class DeleteDocumentCommand:
-    """Application Service / Use Case executing document deletion.
+    """Application Service / Use Case executing document deletion."""
 
-    Deletes the document database record and all associated assets in S3.
-
-    Attributes:
-        db (AsyncSession): Database session.
-        storage (StorageProvider): Storage client interface.
-    """
-
-    def __init__(self, db: AsyncSession, storage: StorageProvider) -> None:
-        self.db = db
+    def __init__(self, uow: UnitOfWork, storage: StorageProvider) -> None:
+        self.uow = uow
         self.storage = storage
 
     async def execute(self, document_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
-        """Executes the document deletion flow.
-
-        Args:
-            document_id (uuid.UUID): Target document ID to delete.
-            tenant_id (uuid.UUID): Tenant owner ID.
-
-        Raises:
-            ServiceError: If target document cannot be resolved or accessed.
-        """
-        # 1. Fetch document record
-        stmt = select(Document).where(
-            Document.id == document_id, Document.tenant_id == tenant_id
-        )
-        result = await self.db.execute(stmt)
-        doc = result.scalar_one_or_none()
-        if not doc:
+        """Executes the document deletion flow."""
+        doc_repo = self.uow.repo(DocumentRepository)
+        doc = await doc_repo.get(document_id)
+        if not doc or doc.tenant_id != tenant_id:
             raise ServiceError(
                 f"Document not found or access denied: {document_id}",
                 status_code=404,
@@ -59,5 +38,16 @@ class DeleteDocumentCommand:
             pass
 
         # 4. Delete database record
-        await self.db.delete(doc)
-        await self.db.commit()
+        await doc_repo.delete(doc)
+        
+        # Record document deleted domain event
+        self.uow.record_event(DomainEvent(
+            event_type="document.deleted",
+            payload={
+                "document_id": str(doc.id),
+                "tenant_id": str(tenant_id),
+                "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
+                "name": doc.name
+            }
+        ))
+        await self.uow.flush()

@@ -15,9 +15,10 @@ def setup_logging() -> None:
 
     class RequestIdFilter(logging.Filter):
         def filter(self, record):
-            from app.api.middleware import get_current_request_id
+            from app.core.context import current_context_or_none
 
-            record.request_id = get_current_request_id() or "-"
+            ctx = current_context_or_none()
+            record.request_id = ctx.request_id if ctx else "-"
             return True
 
     logging_config = {

@@ -1,29 +1,26 @@
+# app/modules/documents/commands/upload_document.py
 import hashlib
 import io
 import uuid
 from typing import BinaryIO
-
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.exceptions import ServiceError
 from app.core.storage import StorageProvider
+from app.core.uow import UnitOfWork
+from app.core.context import current_context
+from app.core.events import DomainEvent
 from app.modules.documents.models import Document, Workspace
-
+from app.modules.documents.repository import DocumentRepository, WorkspaceRepository
 
 class UploadDocumentCommand:
     """Application Service / Use Case executing document uploads.
 
     Coordinates database records insertion, raw file uploads to the object
     storage provider, and celery task dispatch.
-
-    Attributes:
-        db (AsyncSession): Database session.
-        storage (StorageProvider): Storage client interface.
     """
 
-    def __init__(self, db: AsyncSession, storage: StorageProvider) -> None:
-        self.db = db
+    def __init__(self, uow: UnitOfWork, storage: StorageProvider) -> None:
+        self.uow = uow
         self.storage = storage
 
     async def execute(
@@ -35,25 +32,13 @@ class UploadDocumentCommand:
         file_obj: BinaryIO,
         mime_type: str | None = None,
     ) -> Document:
-        """Executes the document upload flow.
+        """Executes the document upload flow."""
+        ws_repo = self.uow.repo(WorkspaceRepository)
+        doc_repo = self.uow.repo(DocumentRepository)
 
-        Args:
-            tenant_id (uuid.UUID): Tenant owner ID.
-            workspace_id (uuid.UUID): Target workspace ID.
-            filename (str): Source filename.
-            file_size (int): Size of the file in bytes.
-            file_obj (BinaryIO): Binary stream of the file content.
-            mime_type (str | None): File MIME type.
-
-        Returns:
-            Document: The newly created Document database model instance.
-
-        Raises:
-            ServiceError: If target workspace cannot be resolved or accessed.
-        """
         # 1. Verify workspace ownership
-        workspace = await self._get_workspace(workspace_id, tenant_id)
-        if not workspace:
+        workspace = await ws_repo.get(workspace_id)
+        if not workspace or workspace.tenant_id != tenant_id:
             raise ServiceError(
                 f"Workspace not found or access denied: {workspace_id}",
                 status_code=404,
@@ -75,32 +60,35 @@ class UploadDocumentCommand:
             file_size=file_size,
             mime_type=mime_type,
         )
-        self.db.add(doc)
+        await doc_repo.add(doc)
 
         # 3. Upload to S3 + checksum
         content = file_obj.read()
         doc.checksum = hashlib.sha256(content).hexdigest()
         await self.storage.upload_file(io.BytesIO(content), object_key)
 
-        # 4. Commit
-        await self.db.commit()
-        await self.db.refresh(doc)
+        # 4. Flush to DB so the record is visible when task runs
+        await self.uow.flush()
 
-        # 5. Dispatch background worker
+        # 5. Dispatch background worker with context dict propagation
         from app.worker.tasks import parse_document_task
+        ctx_dict = current_context().to_dict()
 
-        parse_document_task.delay(str(doc.id))
+        # UoW records the event
+        self.uow.record_event(DomainEvent(
+            event_type="document.uploaded",
+            payload={
+                "document_id": str(doc.id),
+                "tenant_id": str(tenant_id),
+                "workspace_id": str(workspace_id),
+                "name": filename
+            }
+        ))
+
+        # We trigger task.delay
+        parse_document_task.delay(str(doc.id), ctx_dict)
 
         return doc
-
-    async def _get_workspace(
-        self, ws_id: uuid.UUID, tenant_id: uuid.UUID
-    ) -> Workspace | None:
-        stmt = select(Workspace).where(
-            Workspace.id == ws_id, Workspace.tenant_id == tenant_id
-        )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
 
     @staticmethod
     def _extract_extension(filename: str) -> str:

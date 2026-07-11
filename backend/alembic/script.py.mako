@@ -13,7 +13,7 @@ import sqlalchemy as sa
 import pgvector
 
 # auto-generated imports
-${imports}
+${context.get('imports', '')}
 
 # revision identifiers, used by Alembic.
 revision: str = ${repr(up_revision)}

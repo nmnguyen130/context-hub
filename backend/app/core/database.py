@@ -13,30 +13,20 @@ from sqlalchemy.orm import (
     with_loader_criteria,
 )
 
-# Active tenant context
-_tenant_id_context: ContextVar[uuid.UUID | None] = ContextVar("tenant_id", default=None)
+from app.core.context import current_context_or_none
 
 
 def get_current_tenant_id() -> uuid.UUID | None:
-    """Gets the current tenant ID."""
-    return _tenant_id_context.get()
-
-
-def set_current_tenant_id(tenant_id: uuid.UUID | None) -> Token[uuid.UUID | None]:
-    """Sets the current tenant ID."""
-    return _tenant_id_context.set(tenant_id)
-
-
-def reset_current_tenant_id(token: Token[uuid.UUID | None]) -> None:
-    """Resets the tenant ID context."""
-    _tenant_id_context.reset(token)
+    """Gets the current tenant ID from the unified request context."""
+    ctx = current_context_or_none()
+    return ctx.tenant_id if ctx else None
 
 
 # 2. Database manager
 class Database:
-    """Manages async engine and session factory lifecycle."""
+    """Manages async engines and session factory lifecycles."""
 
-    def __init__(self, url: str, pool_size: int = 10, max_overflow: int = 20):
+    def __init__(self, url: str, pool_size: int = 10, max_overflow: int = 20, admin_url: str | None = None):
         self.engine = create_async_engine(
             url,
             echo=False,
@@ -51,11 +41,34 @@ class Database:
             autoflush=False,
         )
 
+        if not admin_url:
+            if "postgres:" in url:
+                admin_url = url
+            elif "app_user:" in url:
+                admin_url = url.replace("app_user:", "app_admin:")
+            else:
+                admin_url = url
+
+        self.admin_engine = create_async_engine(
+            admin_url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+        )
+        self.admin_session_factory = async_sessionmaker(
+            bind=self.admin_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+
     def session(self) -> AsyncSession:
         return self.session_factory()
 
     async def dispose(self) -> None:
         await self.engine.dispose()
+        await self.admin_engine.dispose()
 
 
 # Global base model

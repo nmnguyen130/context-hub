@@ -1,4 +1,3 @@
-from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -6,13 +5,15 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from app.api.deps import (
     get_current_admin_user,
     get_current_user,
+    get_uow,
 )
+from app.core.uow import UnitOfWork
 from app.core.enums import InvitationStatus
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
-    InviteCreateRequest,
-    InviteResponse,
+    InvitationCreateRequest,
+    InvitationResponse,
     JoinRequest,
     LoginRequest,
     RefreshRequest,
@@ -22,18 +23,18 @@ from app.modules.auth.schemas import (
     UserRoleUpdateRequest,
     UserUpdateRequest,
 )
-from app.modules.auth.services.auth_service import AuthService
-from app.modules.auth.services.invitation_service import InvitationService
-from app.modules.auth.services.registration_service import RegistrationService
-from app.modules.auth.services.user_service import UserService
+from app.modules.auth.services import (
+    AuthService,
+    InvitationService,
+    RegistrationService,
+    UserService,
+)
 
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 user_router = APIRouter(prefix="/users", tags=["User Management"])
 
 
-# ============================================================
 # Auth Endpoints
-# ============================================================
 
 
 @auth_router.post(
@@ -43,7 +44,7 @@ async def register(
     data: RegisterRequest,
     reg_service: RegistrationService = Depends(),
 ):
-    """Registers a new tenant organization along with its first Administrator user."""
+    """Registers a new tenant and its admin user."""
     user, _ = await reg_service.register(data)
     return user
 
@@ -54,7 +55,7 @@ async def login(
     request: Request,
     auth_service: AuthService = Depends(),
 ):
-    """Authenticates credentials and returns a stateless access token and DB-stored refresh token."""
+    """Authenticates credentials and returns tokens."""
     ip_address = request.client.host if request.client else None
     device_info = request.headers.get("user-agent")
 
@@ -69,7 +70,7 @@ async def refresh(
     request: Request,
     auth_service: AuthService = Depends(),
 ):
-    """Refreshes the session. Performs token rotation and theft detection."""
+    """Refreshes the session."""
     ip_address = request.client.host if request.client else None
     device_info = request.headers.get("user-agent")
 
@@ -83,7 +84,7 @@ async def logout(
     data: RefreshRequest,
     auth_service: AuthService = Depends(),
 ):
-    """Revokes a specific refresh token session (logs out of current device)."""
+    """Logs out of the current device."""
     await auth_service.logout(data.refresh_token)
 
 
@@ -92,13 +93,13 @@ async def logout_all(
     current_user: User = Depends(get_current_user),
     auth_service: AuthService = Depends(),
 ):
-    """Revokes ALL active refresh token sessions for the authenticated user (logs out of all devices)."""
+    """Logs out of all devices."""
     await auth_service.logout_all(current_user.id, current_user.tenant_id)
 
 
 @auth_router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    """Retrieves profile info for the currently authenticated user."""
+    """Gets current user profile."""
     return current_user
 
 
@@ -107,9 +108,12 @@ async def update_profile(
     data: UserUpdateRequest,
     current_user: User = Depends(get_current_user),
     user_service: UserService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Allows a user to self-update their first name and last name."""
-    return await user_service.update_profile(current_user.id, data)
+    """Updates profile details."""
+    user = await user_service.update_profile(current_user.id, data)
+    await uow.commit()
+    return user
 
 
 @auth_router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,30 +121,32 @@ async def change_password(
     data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     user_service: UserService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Allows a user to change their password after verifying the old one. Invalidates all active sessions."""
+    """Changes password."""
     await user_service.change_password(current_user.id, data)
+    await uow.commit()
 
 
-# ============================================================
 # Invitation Endpoints (Admin Only, except Accept)
-# ============================================================
 
 
 @auth_router.post(
     "/invitations", response_model=dict, status_code=status.HTTP_201_CREATED
 )
 async def invite_user(
-    data: InviteCreateRequest,
+    data: InvitationCreateRequest,
     current_user: User = Depends(get_current_admin_user),
     invite_service: InvitationService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Creates a new user invitation and returns the raw invitation link/token. Admin only."""
-    invitation, raw_token = await invite_service.create(
+    """Creates an invitation. Admin only."""
+    invitation, raw_token = await invite_service.create_invitation(
         tenant_id=current_user.tenant_id,
         invited_by=current_user.id,
         data=data,
     )
+    await uow.commit()
     return {
         "invitation_id": str(invitation.id),
         "email": invitation.email,
@@ -150,7 +156,7 @@ async def invite_user(
     }
 
 
-@auth_router.get("/invitations", response_model=list[InviteResponse])
+@auth_router.get("/invitations", response_model=list[InvitationResponse])
 async def list_invitations(
     status: InvitationStatus | None = Query(
         None, description="Filter by status (PENDING, ACCEPTED, REVOKED, EXPIRED)"
@@ -158,47 +164,39 @@ async def list_invitations(
     current_user: User = Depends(get_current_admin_user),
     invite_service: InvitationService = Depends(),
 ):
-    """Lists invitations sent by this tenant organization. Admin only."""
+    """Lists invitations. Admin only."""
     return await invite_service.list_invitations(current_user.tenant_id, status=status)
 
 
 @auth_router.delete("/invitations/{id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invitation(
-    id: str,
+    id: UUID,
     current_user: User = Depends(get_current_admin_user),
     invite_service: InvitationService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Revokes a pending user invitation. Admin only."""
-    # Convert id string to UUID
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid invitation ID format")
-
-    await invite_service.revoke(
+    """Revokes an invitation. Admin only."""
+    await invite_service.revoke_invitation(
         tenant_id=current_user.tenant_id,
-        invitation_id=uuid_id,
-        revoked_by=current_user.id,
+        invitation_id=id,
     )
+    await uow.commit()
 
 
 @auth_router.post("/invitations/{id}/resend", response_model=dict)
 async def resend_invitation(
-    id: str,
+    id: UUID,
     current_user: User = Depends(get_current_admin_user),
     invite_service: InvitationService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Resends/regenerates a pending or expired invitation. Admin only."""
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid invitation ID format")
-
-    invitation, raw_token = await invite_service.resend(
+    """Resends/regenerates an invitation. Admin only."""
+    invitation, raw_token = await invite_service.resend_invitation(
         tenant_id=current_user.tenant_id,
-        invitation_id=uuid_id,
+        invitation_id=id,
         resending_user_id=current_user.id,
     )
+    await uow.commit()
     return {
         "invitation_id": str(invitation.id),
         "email": invitation.email,
@@ -216,13 +214,11 @@ async def accept_invitation(
     data: JoinRequest,
     reg_service: RegistrationService = Depends(),
 ):
-    """Registers a user into the system by accepting a valid invitation token. Publicly accessible."""
+    """Accepts an invitation."""
     return await reg_service.join_via_invitation(data)
 
 
-# ============================================================
 # User Management Endpoints (Admin Only)
-# ============================================================
 
 
 @user_router.get("", response_model=dict)
@@ -230,10 +226,10 @@ async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     is_active: bool | None = Query(None),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_user),
     user_service: UserService = Depends(),
 ):
-    """Lists users in the organization with pagination and filtering. Admin only."""
+    """Lists users. Admin only."""
     users, total = await user_service.list_users(
         current_user.tenant_id, skip=skip, limit=limit, is_active=is_active
     )
@@ -247,62 +243,53 @@ async def list_users(
 
 @user_router.get("/{id}", response_model=UserResponse)
 async def get_user(
-    id: str,
-    current_user: User = Depends(get_current_admin_user),
+    id: UUID,
+    current_user: User = Depends(get_current_user),
     user_service: UserService = Depends(),
 ):
-    """Retrieves profile details of a user inside the organization. Admin only."""
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid user ID format")
-    return await user_service.get_user(current_user.tenant_id, uuid_id)
+    """Gets user details. Admin only."""
+    return await user_service.get_user(current_user.tenant_id, id)
 
 
 @user_router.patch("/{id}/role", response_model=UserResponse)
 async def update_user_role(
-    id: str,
+    id: UUID,
     data: UserRoleUpdateRequest,
     current_user: User = Depends(get_current_admin_user),
     user_service: UserService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Changes a user's role. Admin only."""
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid user ID format")
-    return await user_service.update_role(
-        current_user.tenant_id, uuid_id, data, acting_user_id=current_user.id
+    """Updates user role. Admin only."""
+    user = await user_service.update_role(
+        current_user.tenant_id, id, data, acting_user_id=current_user.id
     )
+    await uow.commit()
+    return user
 
 
 @user_router.post("/{id}/deactivate", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_user(
-    id: str,
+    id: UUID,
     current_user: User = Depends(get_current_admin_user),
     user_service: UserService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Deactivates a user account and revokes all active session tokens. Admin only."""
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid user ID format")
+    """Deactivates a user. Admin only."""
     await user_service.deactivate(
-        current_user.tenant_id, uuid_id, acting_user_id=current_user.id
+        current_user.tenant_id, id, acting_user_id=current_user.id
     )
+    await uow.commit()
 
 
 @user_router.post("/{id}/reactivate", status_code=status.HTTP_204_NO_CONTENT)
 async def reactivate_user(
-    id: str,
+    id: UUID,
     current_user: User = Depends(get_current_admin_user),
     user_service: UserService = Depends(),
+    uow: UnitOfWork = Depends(get_uow),
 ):
-    """Re-enables a deactivated user account. Admin only."""
-    try:
-        uuid_id = UUID(id)
-    except ValueError:
-        raise ValueError("Invalid user ID format")
+    """Reactivates a user. Admin only."""
     await user_service.reactivate(
-        current_user.tenant_id, uuid_id, acting_user_id=current_user.id
+        current_user.tenant_id, id, acting_user_id=current_user.id
     )
+    await uow.commit()

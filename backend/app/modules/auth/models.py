@@ -1,7 +1,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,23 +27,28 @@ class User(TenantBaseModel):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
-    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    role: Mapped[UserRole] = mapped_column(String(50), default=UserRole.MEMBER)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, native_enum=False), default=UserRole.MEMBER, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     def __repr__(self) -> str:
-        return f"<User email={self.email} role={self.role} tenant={self.tenant_id}>"
+        return f"<User(id={self.id!s}, email={self.email!r}, role={self.role.value})>"
 
 
 class RefreshToken(TenantBaseModel):
@@ -50,17 +63,25 @@ class RefreshToken(TenantBaseModel):
         nullable=False,
         index=True,
     )
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=False,
+    )
     device_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
 
     @property
@@ -68,7 +89,10 @@ class RefreshToken(TenantBaseModel):
         return self.revoked_at is not None
 
     def __repr__(self) -> str:
-        return f"<RefreshToken user={self.user_id} revoked={self.is_revoked}>"
+        return (
+            f"<RefreshToken(id={self.id!s}, user_id={self.user_id!s}, "
+            f"revoked={self.is_revoked})>"
+        )
 
 
 class Invitation(TenantBaseModel):
@@ -77,27 +101,50 @@ class Invitation(TenantBaseModel):
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    invited_by: Mapped[uuid.UUID] = mapped_column(
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String(50), default=UserRole.MEMBER)
-    status: Mapped[InvitationStatus] = mapped_column(
-        String(50), default=InvitationStatus.PENDING
+    email: Mapped[str] = mapped_column(
+        String(255),
+        index=True,
+        nullable=False,
     )
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, native_enum=False),
+        default=UserRole.MEMBER,
+        nullable=False,
+    )
+    status: Mapped[InvitationStatus] = mapped_column(
+        Enum(InvitationStatus, native_enum=False),
+        default=InvitationStatus.PENDING,
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=False,
+    )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     def __repr__(self) -> str:
-        return f"<Invitation email={self.email} status={self.status} tenant={self.tenant_id}>"
+        return (
+            f"<Invitation(id={self.id!s}, email={self.email!r}, "
+            f"status={self.status.value})>"
+        )

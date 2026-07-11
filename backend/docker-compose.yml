@@ -52,6 +52,8 @@ services:
     volumes:
       - ./app:/workspace/app
       - ./tests:/workspace/tests
+      - ./alembic:/workspace/alembic
+      - ./alembic.ini:/workspace/alembic.ini
     restart: unless-stopped
 
   worker:

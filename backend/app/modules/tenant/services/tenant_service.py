@@ -1,27 +1,21 @@
+# app/modules/tenant/services/tenant_service.py
 import re
 from uuid import UUID
-
 from fastapi import Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.api.deps import get_db
+from app.api.deps import get_uow
 from app.core.exceptions import ServiceError
+from app.core.uow import UnitOfWork
 from app.modules.tenant.models import Tenant
+from app.modules.tenant.repository import TenantRepository
 from app.modules.tenant.schemas import TenantUpdate
 
-
 class TenantService:
-    def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.db = db
-
-    @staticmethod
-    def _query():
-        return select(Tenant).execution_options(skip_tenant_filter=True)
+    def __init__(self, uow: UnitOfWork = Depends(get_uow)):
+        self.uow = uow
 
     async def get_by_id(self, tenant_id: UUID) -> Tenant:
         """Retrieves a tenant by ID."""
-        tenant = await self.db.scalar(self._query().where(Tenant.id == tenant_id))
+        tenant = await self.uow.repo(TenantRepository).get(tenant_id)
         if not tenant:
             raise ServiceError("Tenant not found", status_code=404)
         return tenant
@@ -29,7 +23,7 @@ class TenantService:
     async def get_by_slug(self, slug: str) -> Tenant | None:
         """Retrieves a tenant by slug."""
         slug = slug.strip().lower()
-        return await self.db.scalar(self._query().where(Tenant.slug == slug))
+        return await self.uow.repo(TenantRepository).get_by_slug(slug)
 
     async def update(self, tenant_id: UUID, data: TenantUpdate) -> Tenant:
         """Updates a tenant."""
@@ -49,7 +43,7 @@ class TenantService:
                 **data.settings.model_dump(mode="json", exclude_unset=True),
             }
 
-        await self.db.flush()
+        await self.uow.flush()
         return tenant
 
     async def deactivate(self, tenant_id: UUID) -> None:
@@ -58,7 +52,7 @@ class TenantService:
 
         if tenant.is_active:
             tenant.is_active = False
-            await self.db.flush()
+            await self.uow.flush()
 
     @staticmethod
     def generate_slug(name: str) -> str:

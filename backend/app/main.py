@@ -13,7 +13,7 @@ from app.core.logging import setup_logging
 setup_logging()
 
 from app.api.deps import get_db
-from app.api.middleware import RequestIdMiddleware, TenantAuthMiddleware
+from app.api.middleware import RequestContextMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import Database
@@ -55,9 +55,27 @@ async def lifespan(app: FastAPI):
             logger.critical(f"Embedding validation failed: {e}")
             raise
 
+    # Start outbox relay background task
+    import asyncio
+    from app.worker.outbox_relay import relay_loop
+    from app.core.event_bus import event_bus
+    relay_task = asyncio.create_task(
+        relay_loop(
+            session_factory=app.state.db.session_factory,
+            event_bus=event_bus,
+            poll_interval=0.5
+        )
+    )
+
     yield
 
     # Teardown
+    relay_task.cancel()
+    try:
+        await relay_task
+    except asyncio.CancelledError:
+        pass
+
     await app.state.redis.aclose()
     await app.state.db.dispose()
 
@@ -95,8 +113,7 @@ app.add_middleware(
 
 
 # Multi-Tenancy Isolation & Tracing
-app.add_middleware(RequestIdMiddleware)
-app.add_middleware(TenantAuthMiddleware)
+app.add_middleware(RequestContextMiddleware)
 
 
 # Healthcheck

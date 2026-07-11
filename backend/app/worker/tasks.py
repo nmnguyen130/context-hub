@@ -25,39 +25,52 @@ celery_app.conf.update(
 
 
 @celery_app.task(bind=True, max_retries=3)
-def parse_document_task(self, document_id: str) -> None:
+def parse_document_task(self, document_id: str, ctx_dict: dict) -> None:
     """Celery task running synchronous event loop to invoke async parsing logic."""
     import botocore.exceptions
     import sqlalchemy.exc
+    import uuid
+    from app.core.context import RequestContext, bind_context
 
     from app.modules.documents.commands.ingest_document import (
         mark_document_as_error,
         run_ingestion,
     )
 
-    try:
-        asyncio.run(run_ingestion(document_id))
-    except (
-        botocore.exceptions.BotoCoreError,
-        sqlalchemy.exc.OperationalError,
-        OSError,
-    ) as infra_err:
-        retry_count = self.request.retries
-        countdown = 2**retry_count
+    ctx = RequestContext(
+        request_id=ctx_dict["request_id"],
+        correlation_id=ctx_dict["correlation_id"],
+        tenant_id=uuid.UUID(ctx_dict["tenant_id"]) if ctx_dict["tenant_id"] else None,
+        actor_id=uuid.UUID(ctx_dict["actor_id"]) if ctx_dict["actor_id"] else None,
+        is_platform_admin=ctx_dict["is_platform_admin"],
+        ip_address=ctx_dict.get("ip_address"),
+        user_agent=ctx_dict.get("user_agent"),
+    )
+
+    with bind_context(ctx):
         try:
-            raise self.retry(exc=infra_err, countdown=countdown)
-        except self.MaxRetriesExceededError:
-            # All retries exhausted: mark document as ERROR
-            asyncio.run(
-                mark_document_as_error(
-                    document_id,
-                    f"Infrastructure failure (retries exhausted): {str(infra_err)}",
+            asyncio.run(run_ingestion(document_id))
+        except (
+            botocore.exceptions.BotoCoreError,
+            sqlalchemy.exc.OperationalError,
+            OSError,
+        ) as infra_err:
+            retry_count = self.request.retries
+            countdown = 2**retry_count
+            try:
+                raise self.retry(exc=infra_err, countdown=countdown)
+            except self.MaxRetriesExceededError:
+                # All retries exhausted: mark document as ERROR
+                asyncio.run(
+                    mark_document_as_error(
+                        document_id,
+                        f"Infrastructure failure (retries exhausted): {str(infra_err)}",
+                    )
                 )
-            )
-            raise infra_err
-    except Exception as logic_err:
-        # Non-infrastructure logical error: already handled inside usecase
-        raise logic_err
+                raise infra_err
+        except Exception as logic_err:
+            # Non-infrastructure logical error: already handled inside usecase
+            raise logic_err
 
 
 @celery_app.task

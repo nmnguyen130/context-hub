@@ -1,124 +1,115 @@
-import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-EMAIL_REGEX = r"^[\w\.\+\-]+@[\w\.\-]+\.\w+$"
+from app.core.enums import InvitationStatus, UserRole
 
 
-# ============================================================
 # Base
-# ============================================================
-class _EmailMixin(BaseModel):
-    email: str = Field(..., max_length=255)
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailMixin(BaseModel):
+    email: EmailStr
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, v: str) -> str:
-        v = v.strip().lower()
-        if not re.match(EMAIL_REGEX, v):
-            raise ValueError("Invalid email format")
-        return v
+    def normalize_email(cls, value: EmailStr) -> str:
+        return value.lower()
 
 
-# ============================================================
-# Registration
-# ============================================================
-class RegisterRequest(_EmailMixin):
-    """Register a new tenant organization + admin user."""
-
-    password: str = Field(..., min_length=8, max_length=72)
+class NameMixin(BaseModel):
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
+
+
+class PasswordMixin(BaseModel):
+    password: str = Field(..., min_length=8, max_length=72)
+
+
+# Registration
+class RegisterRequest(EmailMixin, NameMixin, PasswordMixin):
+    """Registration request schema."""
+
     tenant_name: str = Field(..., min_length=2, max_length=255)
 
     @field_validator("tenant_name")
     @classmethod
-    def validate_tenant_name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
+    def validate_tenant_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
             raise ValueError("Tenant name cannot be empty")
-        return v
+        return value
 
 
-class JoinRequest(_EmailMixin):
-    """Join an existing tenant via invitation token."""
+class JoinRequest(EmailMixin, NameMixin, PasswordMixin):
+    """Join workspace request schema."""
 
-    password: str = Field(..., min_length=8, max_length=72)
-    first_name: str | None = Field(default=None, max_length=100)
-    last_name: str | None = Field(default=None, max_length=100)
-    invite_token: str
+    invite_token: str = Field(..., min_length=1)
 
 
-# ============================================================
 # Authentication
-# ============================================================
-class LoginRequest(_EmailMixin):
-    """Login with email + password + tenant slug."""
+class LoginRequest(EmailMixin):
+    """Login request schema."""
 
     password: str = Field(..., min_length=1, max_length=72)
     tenant_slug: str = Field(..., min_length=1, max_length=255)
 
+    @field_validator("tenant_slug")
+    @classmethod
+    def normalize_slug(cls, value: str) -> str:
+        return value.strip().lower()
+
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(..., min_length=1)
 
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    expires_in: int  # seconds until access token expiry
+    expires_in: int
 
 
-# ============================================================
 # Invitations
-# ============================================================
-class InviteCreateRequest(_EmailMixin):
-    role: str = Field(default="MEMBER", pattern="^(MEMBER|VIEWER)$")
+class InvitationCreateRequest(EmailMixin):
+    role: UserRole = UserRole.MEMBER
 
 
-class InviteResponse(BaseModel):
+class InvitationResponse(ORMModel):
     id: UUID
     email: str
-    role: str
-    status: str
+    role: UserRole
+    status: InvitationStatus
     invited_by: UUID | None
     expires_at: datetime
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
 
-
-# ============================================================
 # User Management
-# ============================================================
-class UserResponse(BaseModel):
+class UserResponse(ORMModel):
     id: UUID
     email: str
     first_name: str | None
     last_name: str | None
-    role: str
+    role: UserRole
     is_active: bool
     tenant_id: UUID
     last_login_at: datetime | None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
 
-
-class UserUpdateRequest(BaseModel):
-    """Self-service profile update."""
-
-    first_name: str | None = Field(default=None, max_length=100)
-    last_name: str | None = Field(default=None, max_length=100)
+class UserUpdateRequest(NameMixin):
+    """Profile update request schema."""
 
 
 class UserRoleUpdateRequest(BaseModel):
-    """Admin-only role change."""
+    """Role update request schema."""
 
-    role: str = Field(..., pattern="^(ADMIN|MEMBER|VIEWER)$")
+    role: UserRole
 
 
 class ChangePasswordRequest(BaseModel):

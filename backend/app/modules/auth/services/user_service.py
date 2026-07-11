@@ -1,28 +1,47 @@
+# app/modules/auth/services/user_service.py
 from datetime import UTC, datetime
 from uuid import UUID
-
+from fastapi import Depends
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.api.deps import get_uow
 from app.core.enums import UserRole
 from app.core.exceptions import ServiceError
 from app.core.security import hash_password, verify_password
-from app.modules.audit.service import AuditService
+from app.core.uow import UnitOfWork
 from app.modules.auth.models import RefreshToken, User
-from app.modules.auth.schemas import (
-    ChangePasswordRequest,
-    UserRoleUpdateRequest,
-    UserUpdateRequest,
-)
-
-
-from fastapi import Depends
-from app.api.deps import get_db
-
+from app.modules.auth.repository import UserRepository
 
 class UserService:
-    def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.db = db
+    def __init__(self, uow: UnitOfWork = Depends(get_uow)):
+        self.uow = uow
+
+    @staticmethod
+    def _utcnow() -> datetime:
+        return datetime.now(UTC)
+
+    async def _count_active_admins(self, tenant_id: UUID) -> int:
+        user_repo = self.uow.repo(UserRepository)
+        stmt = (
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.tenant_id == tenant_id,
+                User.role == UserRole.ADMIN,
+                User.is_active.is_(True)
+            )
+        )
+        return await self.uow.session.scalar(stmt) or 0
+
+    async def _revoke_sessions(self, user_id: UUID) -> None:
+        stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None)
+            )
+            .values(revoked_at=self._utcnow())
+        )
+        await self.uow.session.execute(stmt)
 
     async def list_users(
         self,
@@ -31,143 +50,81 @@ class UserService:
         limit: int = 50,
         is_active: bool | None = None,
     ) -> tuple[list[User], int]:
-        """Lists users in the tenant with pagination and optional status filter."""
-        query = select(User).where(User.tenant_id == tenant_id)
+        """Lists users with pagination."""
+        user_repo = self.uow.repo(UserRepository)
+        stmt = user_repo.query().where(User.tenant_id == tenant_id)
         if is_active is not None:
-            query = query.where(User.is_active == is_active)
+            stmt = stmt.where(User.is_active == is_active)
 
-        # Count total
-        count_stmt = select(func.count()).select_from(query.subquery())
-        total_count = (await self.db.execute(count_stmt)).scalar() or 0
-
-        # Paginated fetch
-        query = query.offset(skip).limit(limit)
-        users = list((await self.db.execute(query)).scalars().all())
-
-        return users, total_count
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = await self.uow.session.scalar(count_stmt) or 0
+        result = await self.uow.session.scalars(stmt.offset(skip).limit(limit))
+        return list(result), total
 
     async def get_user(self, tenant_id: UUID, user_id: UUID) -> User:
-        """Retrieves a specific user within a tenant."""
-        stmt = select(User).where(User.id == user_id, User.tenant_id == tenant_id)
-        user = (await self.db.execute(stmt)).scalar_one_or_none()
-        if not user:
+        """Retrieves a specific user."""
+        user_repo = self.uow.repo(UserRepository)
+        user = await user_repo.get(user_id)
+        if not user or user.tenant_id != tenant_id:
             raise ServiceError("User not found", status_code=404)
         return user
 
-    async def update_profile(self, user_id: UUID, data: UserUpdateRequest) -> User:
-        """Self-service profile update (first name, last name)."""
-        # User is already scoped to their own id, but let's load
-        stmt = (
-            select(User)
-            .where(User.id == user_id)
-            .execution_options(skip_tenant_filter=True)
-        )
-        user = (await self.db.execute(stmt)).scalar_one_or_none()
+    async def update_profile(self, user_id: UUID, data: any) -> User:
+        """Updates user profile details."""
+        user_repo = self.uow.repo(UserRepository)
+        user = await user_repo.get(user_id)
         if not user:
             raise ServiceError("User not found", status_code=404)
 
-        if data.first_name is not None:
-            user.first_name = data.first_name
-        if data.last_name is not None:
-            user.last_name = data.last_name
+        updates = data.model_dump(exclude_none=True)
+        for field, value in updates.items():
+            setattr(user, field, value)
 
-        self.db.add(user)
-
-        # Log Audit
-        await AuditService(self.db).log(
-            tenant_id=user.tenant_id,
-            user_id=user_id,
-            action="USER_UPDATE_PROFILE",
-        )
-        await self.db.flush()
+        await self.uow.flush()
         return user
 
     async def update_role(
         self,
         tenant_id: UUID,
         target_user_id: UUID,
-        data: UserRoleUpdateRequest,
+        data: any,
         acting_user_id: UUID,
     ) -> User:
-        """Admin-only: change a user's role. Prevents self-demoting or removing the last admin."""
+        """Changes user role."""
         if target_user_id == acting_user_id:
             raise ServiceError("Admins cannot modify their own roles", status_code=400)
 
-        target_user = await self.get_user(tenant_id, target_user_id)
-        old_role = target_user.role
-
-        # If demoting target user from ADMIN to something else, check if they are the last admin
-        if old_role == UserRole.ADMIN and data.role != UserRole.ADMIN:
-            admin_stmt = (
-                select(func.count())
-                .select_from(User)
-                .where(
-                    User.tenant_id == tenant_id,
-                    User.role == UserRole.ADMIN,
-                    User.is_active == True,
-                )
-                .execution_options(skip_tenant_filter=True)
-            )
-            admin_count = (await self.db.execute(admin_stmt)).scalar() or 0
+        user = await self.get_user(tenant_id, target_user_id)
+        if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
+            admin_count = await self._count_active_admins(tenant_id)
             if admin_count <= 1:
                 raise ServiceError(
                     "Cannot demote the only remaining active Administrator",
                     status_code=400,
                 )
 
-        target_user.role = UserRole(data.role)
-        self.db.add(target_user)
+        user.role = UserRole(data.role)
+        await self.uow.flush()
+        return user
 
-        # Log Audit
-        await AuditService(self.db).log(
-            tenant_id=tenant_id,
-            user_id=acting_user_id,
-            action="USER_ROLE_CHANGE",
-            resource_type="User",
-            resource_id=target_user_id,
-            payload_diff={"before": old_role, "after": data.role},
-        )
-        await self.db.flush()
-        return target_user
-
-    async def change_password(self, user_id: UUID, data: ChangePasswordRequest) -> None:
-        """User changes their own password after verifying their current password."""
-        stmt = (
-            select(User)
-            .where(User.id == user_id)
-            .execution_options(skip_tenant_filter=True)
-        )
-        user = (await self.db.execute(stmt)).scalar_one_or_none()
+    async def change_password(self, user_id: UUID, data: any) -> None:
+        """Changes user password."""
+        user_repo = self.uow.repo(UserRepository)
+        user = await user_repo.get(user_id)
         if not user:
             raise ServiceError("User not found", status_code=404)
 
-        if not verify_password(data.current_password, user.password_hash):
+        if not verify_password(data.current_password, user.hashed_password):
             raise ServiceError("Incorrect current password", status_code=400)
 
-        user.password_hash = hash_password(data.new_password)
-        self.db.add(user)
-
-        # Log Audit
-        await AuditService(self.db).log(
-            tenant_id=user.tenant_id,
-            user_id=user_id,
-            action="USER_PASSWORD_CHANGE",
-        )
-
-        # Revoke all sessions for security on password change
-        revoke_sessions_stmt = (
-            update(RefreshToken)
-            .where(RefreshToken.user_id == user_id)
-            .values(revoked_at=datetime.now(UTC))
-            .execution_options(skip_tenant_filter=True)
-        )
-        await self.db.execute(revoke_sessions_stmt)
-        await self.db.flush()
+        user.hashed_password = hash_password(data.new_password)
+        await self._revoke_sessions(user_id)
+        await self.uow.flush()
 
     async def deactivate(
         self, tenant_id: UUID, user_id: UUID, acting_user_id: UUID
     ) -> None:
-        """Admin-only: deactivate a user. Prevents self-deactivation or deactivating the last admin."""
+        """Deactivates a user."""
         if user_id == acting_user_id:
             raise ServiceError(
                 "Admins cannot deactivate their own accounts", status_code=400
@@ -175,21 +132,10 @@ class UserService:
 
         user = await self.get_user(tenant_id, user_id)
         if not user.is_active:
-            return  # Already deactivated
+            return
 
-        # If deactivating an ADMIN, check if they are the last active admin
         if user.role == UserRole.ADMIN:
-            admin_stmt = (
-                select(func.count())
-                .select_from(User)
-                .where(
-                    User.tenant_id == tenant_id,
-                    User.role == UserRole.ADMIN,
-                    User.is_active == True,
-                )
-                .execution_options(skip_tenant_filter=True)
-            )
-            admin_count = (await self.db.execute(admin_stmt)).scalar() or 0
+            admin_count = await self._count_active_admins(tenant_id)
             if admin_count <= 1:
                 raise ServiceError(
                     "Cannot deactivate the only remaining active Administrator",
@@ -197,44 +143,16 @@ class UserService:
                 )
 
         user.is_active = False
-        self.db.add(user)
-
-        # Log Audit
-        await AuditService(self.db).log(
-            tenant_id=tenant_id,
-            user_id=acting_user_id,
-            action="USER_DEACTIVATE",
-            resource_type="User",
-            resource_id=user_id,
-        )
-
-        # Revoke all active refresh tokens for the user
-        revoke_sessions_stmt = (
-            update(RefreshToken)
-            .where(RefreshToken.user_id == user_id)
-            .values(revoked_at=datetime.now(UTC))
-            .execution_options(skip_tenant_filter=True)
-        )
-        await self.db.execute(revoke_sessions_stmt)
-        await self.db.flush()
+        await self._revoke_sessions(user_id)
+        await self.uow.flush()
 
     async def reactivate(
         self, tenant_id: UUID, user_id: UUID, acting_user_id: UUID
     ) -> None:
-        """Admin-only: reactivates a deactivated user."""
+        """Reactivates a user."""
         user = await self.get_user(tenant_id, user_id)
         if user.is_active:
-            return  # Already active
+            return
 
         user.is_active = True
-        self.db.add(user)
-
-        # Log Audit
-        await AuditService(self.db).log(
-            tenant_id=tenant_id,
-            user_id=acting_user_id,
-            action="USER_REACTIVATE",
-            resource_type="User",
-            resource_id=user_id,
-        )
-        await self.db.flush()
+        await self.uow.flush()
