@@ -1,0 +1,16 @@
+services:
+  api:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./app:/workspace/app
+      - ./tests:/workspace/tests
+      - ./alembic:/workspace/alembic
+      - ./alembic.ini:/workspace/alembic.ini
+
+  worker:
+    volumes:
+      - ./app:/workspace/app
+
+  relay:
+    volumes:
+      - ./app:/workspace/app

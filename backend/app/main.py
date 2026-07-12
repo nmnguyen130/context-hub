@@ -2,82 +2,38 @@ import logging
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-# Setup Logging Early
-from app.core.logging import setup_logging
-
-setup_logging()
-
-from app.api.deps import get_db
 from app.api.middleware import RequestContextMiddleware
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import Database
+from app.core.database import async_session, engine
 from app.core.exceptions import register_exception_handlers
-from app.core.limiter import LUA_SLIDING_WINDOW
-from app.core.storage import S3StorageProvider
+from app.infrastructure.rate_limiter import LUA_SLIDING_WINDOW
+from app.infrastructure.storage import S3StorageProvider
+from app.utils.logging import setup_logging
 
-logger = logging.getLogger("app.main")
+setup_logging()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    app.state.db = Database(settings.DATABASE_URL)
     app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
     app.state.storage = S3StorageProvider()
 
     # Preload rate limiter Lua script
     app.state.limiter_script = app.state.redis.register_script(LUA_SLIDING_WINDOW)
 
-    try:
-        await app.state.storage.ensure_bucket_exists()
-    except Exception:
-        logger.warning("S3 bucket check failed on startup")
-
-    # Embedding dimension validation
-    if settings.GEMINI_API_KEY:
-        from app.infrastructure.clients import GeminiEmbeddingClient
-        from app.modules.documents.models import DocumentChunk
-
-        db_dim = DocumentChunk.embedding.type.dim
-        try:
-            client = GeminiEmbeddingClient()
-            vector = await client.get_embedding("startup_validation")
-            if (dim := len(vector)) != db_dim:
-                raise ValueError(f"Dimension mismatch: expected {db_dim}, got {dim}")
-            logger.info(f"Embedding validation passed (dim={db_dim})")
-        except Exception as e:
-            logger.critical(f"Embedding validation failed: {e}")
-            raise
-
-    # Start outbox relay background task
-    import asyncio
-    from app.worker.outbox_relay import relay_loop
-    from app.core.event_bus import event_bus
-    relay_task = asyncio.create_task(
-        relay_loop(
-            session_factory=app.state.db.session_factory,
-            event_bus=event_bus,
-            poll_interval=0.5
-        )
-    )
-
     yield
 
     # Teardown
-    relay_task.cancel()
-    try:
-        await relay_task
-    except asyncio.CancelledError:
-        pass
-
     await app.state.redis.aclose()
-    await app.state.db.dispose()
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -91,9 +47,7 @@ app = FastAPI(
 register_exception_handlers(app)
 
 # CORS Safety Validation
-origins = [
-    origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()
-]
+origins = [x.strip() for x in settings.ALLOWED_ORIGINS.split(",") if x.strip()]
 if "*" in origins:
     if settings.ENVIRONMENT == "production":
         raise ValueError(
@@ -118,14 +72,14 @@ app.add_middleware(RequestContextMiddleware)
 
 # Healthcheck
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["System"])
-async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
-    """Service health check (pings Postgres and Redis)."""
+async def health_check(request: Request):
     db_ok = False
     redis_ok = False
 
     # Check Database
     try:
-        await db.execute(text("SELECT 1").execution_options(skip_tenant_filter=True))
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
         db_ok = True
     except Exception:
         pass
@@ -157,6 +111,6 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.get("/", tags=["System"])
 async def root():
     return {
-        "message": f"Welcome to {settings.PROJECT_NAME} API Gateway",
+        "message": f"Welcome to {settings.PROJECT_NAME}",
         "docs_url": f"{settings.API_V1_STR}/docs",
     }

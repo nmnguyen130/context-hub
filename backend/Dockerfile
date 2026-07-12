@@ -6,50 +6,36 @@ FROM python:3.13-slim-trixie AS builder
 # Copy uv binary from official image
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /uvx /bin/
 
-# Environment variables for uv build optimization
-ENV UV_LINK_MODE=copy \
-    UV_COMPILE_BYTECODE=1 \
-    UV_PROJECT_ENVIRONMENT=/workspace/.venv
+WORKDIR /app
 
-WORKDIR /workspace
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
-# Copy package definitions and lock files
-COPY pyproject.toml uv.lock* ./
-
-# Install dependencies using cache mount for speed (wheels are used, no build-essential needed)
+# Sync dependencies using bind mounts instead of copying them into the builder filesystem.
+# This maximizes Docker build cache efficiency.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
 
 # ==========================================
 # Stage 2: Runtime
 # ==========================================
 FROM python:3.13-slim-trixie AS runtime
 
-WORKDIR /workspace
+WORKDIR /app
 
-# Python performance and runtime environment configuration
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/workspace/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH"
 
-# Install runtime dependencies and create non-privileged user
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 10001 contexthub \
-    && useradd -u 10001 -g contexthub -m -s /bin/bash contexthub
+# Copy the synced production virtual environment containing only dependencies
+COPY --from=builder /app/.venv /app/.venv
 
-# Copy virtual environment from builder stage
-COPY --from=builder /workspace/.venv /workspace/.venv
+# Copy project codebase
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
-# Copy project code and database migration resources
-COPY --chown=contexthub:contexthub app ./app
-COPY --chown=contexthub:contexthub alembic ./alembic
-COPY --chown=contexthub:contexthub alembic.ini ./alembic.ini
-
-# Set non-root execution permissions
-USER contexthub
-
-# Expose port and run server
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

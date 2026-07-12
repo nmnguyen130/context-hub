@@ -1,125 +1,109 @@
-# app/core/uow.py
-from __future__ import annotations
-from typing import TypeVar, Any
+import logging
+from typing import Self
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from app.core.context import RequestContext
-from app.core.events import DomainEvent, OutboxEvent
-from app.core.event_bus import EventBus
 
-R = TypeVar("R", bound="Repository")
+from app.core.context import RequestContext
+from app.core.events import DomainEventsMixin, OutboxEvent
+
+logger = logging.getLogger(__name__)
+
 
 class UnitOfWork:
+    """Manages transactional boundaries and PostgreSQL Row-Level Security (RLS)."""
+
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
         context: RequestContext,
-        event_bus: EventBus,
-        *,
-        admin_session_factory: async_sessionmaker[AsyncSession] | None = None,
-        admin_reason: str | None = None,
+        is_admin: bool = False,
     ) -> None:
         self._session_factory = session_factory
-        self._admin_session_factory = admin_session_factory
         self._context = context
-        self._event_bus = event_bus
-        self._repos: dict[type, Any] = {}
-        self._events: list[DomainEvent] = []
-        self._admin_reason = admin_reason
-        self.session: AsyncSession
+        self._is_admin = is_admin
+        self.session: AsyncSession | None = None
 
-    @classmethod
-    def as_admin(
-        cls,
-        context: RequestContext,
-        event_bus: EventBus,
-        session_factory: async_sessionmaker[AsyncSession],
-        admin_session_factory: async_sessionmaker[AsyncSession],
-        *,
-        reason: str
-    ) -> "UnitOfWork":
-        """The sole sanctioned cross-tenant path. Uses BYPASSRLS admin role."""
-        is_system_anonymous = reason in (
-            "tenant lookup during login",
-            "user authentication",
-            "new tenant registration"
-        )
-        if not context.is_platform_admin and not is_system_anonymous:
-            raise PermissionError("as_admin() requires a platform-admin RequestContext")
-        if not reason.strip():
-            raise ValueError("a reason is required for any cross-tenant access")
-        return cls(
-            session_factory=session_factory,
-            context=context,
-            event_bus=event_bus,
-            admin_session_factory=admin_session_factory,
-            admin_reason=reason
-        )
-
-    async def __aenter__(self) -> "UnitOfWork":
-        # If in admin mode, use admin session factory
-        if self._admin_reason and self._admin_session_factory:
-            self.session = self._admin_session_factory()
-        else:
-            self.session = self._session_factory()
-
-        # Explicit transaction start if not already in one
+    async def __aenter__(self) -> Self:
+        self.session = self._session_factory()
         if not self.session.in_transaction():
             await self.session.begin()
 
-        if self._admin_reason:
-            # Audit log entry for cross-tenant admin access (transactional)
-            self.record_event(DomainEvent("admin.cross_tenant_access", {
-                "actor_id": str(self._context.actor_id) if self._context.actor_id else None,
-                "reason": self._admin_reason,
-            }))
-        else:
-            # Bind tenant ID to local Postgres variable
-            tid_val = str(self._context.tenant_id) if self._context.tenant_id else ""
+        if self._is_admin:
+            # Bypass Row-Level Security for administrative/global queries
             await self.session.execute(
-                text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": tid_val},
+                text("SELECT set_config('app.bypass_rls', 'true', true)")
             )
+        else:
+            # Enforce Row-Level Security by binding active tenant ID
+            if self._context.tenant_id is None:
+                raise ValueError(
+                    "Cannot open tenant-scoped UnitOfWork without tenant_id."
+                )
 
-        assert self.session.in_transaction(), "UoW session must be inside a transaction"
+            await self.session.execute(
+                text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+                {"tenant_id": str(self._context.tenant_id)},
+            )
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        if exc_type is not None and self.session.in_transaction():
-            await self.session.rollback()
-        await self.session.close()
-
-    def repo(self, repo_cls: type[R]) -> R:
-        if repo_cls not in self._repos:
-            self._repos[repo_cls] = repo_cls(self.session)
-        return self._repos[repo_cls]
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        try:
+            if exc_type is not None:
+                await self.rollback()
+            elif self.session and self.session.in_transaction():
+                logger.warning(
+                    "UnitOfWork exited without commit(); rolling back transaction."
+                )
+                await self.rollback()
+        finally:
+            if self.session:
+                await self.session.close()
 
     async def flush(self) -> None:
+        """Flushes session modifications. Used to resolve database primary keys before commit."""
+        if self.session is None:
+            raise RuntimeError("UnitOfWork session is not active.")
+
         await self.session.flush()
 
-    def record_event(self, event: DomainEvent) -> None:
-        self._events.append(event)
-
     async def commit(self) -> None:
-        try:
-            # 1. Transactional handlers
-            for event in self._events:
-                await self._event_bus.dispatch_transactional(event, self.session)
+        """Collects domain events from modified session entities, writes outbox rows, and commits."""
+        if self.session is None:
+            raise RuntimeError("UnitOfWork session is not active.")
 
-            # 2. Save outbox events
-            outbox_rows = [OutboxEvent.from_domain_event(e, self._context) for e in self._events]
-            for row in outbox_rows:
-                self.session.add(row)
+        # Scan only newly added, modified, or deleted entities.
+        # Bypasses unmodified read-only entities in identity_map to boost query performance.
+        tracked_objects = (
+            set(self.session.new) | set(self.session.dirty) | set(self.session.deleted)
+        )
 
-            await self.session.commit()
-        except Exception:
-            if self.session.in_transaction():
-                await self.session.rollback()
-            raise
+        outbox_events: list[OutboxEvent] = []
 
-        # 3. Optimistic background dispatch
-        if not self._admin_reason:
-            for row in outbox_rows:
-                self._event_bus.dispatch_post_commit_nowait(self._session_factory, row.id)
+        for obj in tracked_objects:
+            if not isinstance(obj, DomainEventsMixin):
+                continue
 
-        self._events.clear()
+            tenant_id = getattr(obj, "tenant_id", None) or self._context.tenant_id
+
+            for event in obj.pull_events():
+                outbox_events.append(
+                    OutboxEvent(
+                        tenant_id=tenant_id,
+                        event_type=event.event_type,
+                        payload={
+                            "data": event.payload,
+                            "trace_id": self._context.trace_id,
+                            "request_id": self._context.request_id,
+                        },
+                    )
+                )
+
+        if outbox_events:
+            self.session.add_all(outbox_events)
+
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        if self.session and self.session.in_transaction():
+            await self.session.rollback()

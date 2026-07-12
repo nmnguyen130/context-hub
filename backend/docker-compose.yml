@@ -1,19 +1,27 @@
-x-shared-env: &shared-env
-  POSTGRES_HOST: db
-  REDIS_HOST: redis
-  PYTHONPATH: /workspace
+x-python-service: &python-service
+  build: .
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  env_file: .env
+  environment:
+    POSTGRES_HOST: db
+    REDIS_HOST: redis
+    PYTHONPATH: /workspace
+  restart: unless-stopped
 
 services:
   db:
     image: pgvector/pgvector:pg18
-    env_file:
-      - .env
+    env_file: .env
     ports:
-      - "127.0.0.1:5432:5432" # Bind to localhost for security during development
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contexthub}" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contexthub}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,56 +31,29 @@ services:
     image: redis:8-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
     ports:
-      - "127.0.0.1:6379:6379" # Bind to localhost for security during development
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    <<: *python-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      <<: *shared-env
-    volumes:
-      - ./app:/workspace/app
-      - ./tests:/workspace/tests
-      - ./alembic:/workspace/alembic
-      - ./alembic.ini:/workspace/alembic.ini
-    restart: unless-stopped
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *python-service
     command: celery -A app.worker.tasks.celery_app worker --loglevel=info
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      <<: *shared-env
-    volumes:
-      - ./app:/workspace/app
-    restart: unless-stopped
+
+  relay:
+    <<: *python-service
+    command: python -m app.worker.relay
 
 volumes:
   postgres_data:

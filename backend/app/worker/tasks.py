@@ -1,78 +1,35 @@
-import asyncio
+import logging
 
-from celery import Celery
+from celery import Celery, Task
 
 from app.core.config import settings
+from app.core.context import RequestContext, bind_context
 
-# Initialize Celery app instance
+logger = logging.getLogger(__name__)
+
 celery_app = Celery(
-    "contexthub_tasks",
+    "app_worker",
     broker=settings.CELERY_BROKER_URL or settings.REDIS_URL,
     backend=settings.REDIS_URL,
 )
 
 celery_app.conf.update(
     task_serializer="json",
-    accept_content=["json"],
     result_serializer="json",
+    accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
     task_default_queue="default",
-    task_routes={
-        "app.worker.tasks.parse_document_task": {"queue": "ingestion"},
-    },
 )
 
 
-@celery_app.task(bind=True, max_retries=3)
-def parse_document_task(self, document_id: str, ctx_dict: dict) -> None:
-    """Celery task running synchronous event loop to invoke async parsing logic."""
-    import botocore.exceptions
-    import sqlalchemy.exc
-    import uuid
-    from app.core.context import RequestContext, bind_context
+class ContextTask(Task):
+    """Celery task with automatic RequestContext restoration."""
 
-    from app.modules.documents.commands.ingest_document import (
-        mark_document_as_error,
-        run_ingestion,
-    )
-
-    ctx = RequestContext(
-        request_id=ctx_dict["request_id"],
-        correlation_id=ctx_dict["correlation_id"],
-        tenant_id=uuid.UUID(ctx_dict["tenant_id"]) if ctx_dict["tenant_id"] else None,
-        actor_id=uuid.UUID(ctx_dict["actor_id"]) if ctx_dict["actor_id"] else None,
-        is_platform_admin=ctx_dict["is_platform_admin"],
-        ip_address=ctx_dict.get("ip_address"),
-        user_agent=ctx_dict.get("user_agent"),
-    )
-
-    with bind_context(ctx):
-        try:
-            asyncio.run(run_ingestion(document_id))
-        except (
-            botocore.exceptions.BotoCoreError,
-            sqlalchemy.exc.OperationalError,
-            OSError,
-        ) as infra_err:
-            retry_count = self.request.retries
-            countdown = 2**retry_count
-            try:
-                raise self.retry(exc=infra_err, countdown=countdown)
-            except self.MaxRetriesExceededError:
-                # All retries exhausted: mark document as ERROR
-                asyncio.run(
-                    mark_document_as_error(
-                        document_id,
-                        f"Infrastructure failure (retries exhausted): {str(infra_err)}",
-                    )
-                )
-                raise infra_err
-        except Exception as logic_err:
-            # Non-infrastructure logical error: already handled inside usecase
-            raise logic_err
-
-
-@celery_app.task
-def debug_task() -> None:
-    print("Celery works successfully!")
+    def __call__(self, *args, **kwargs):
+        ctx_data = kwargs.pop("context", None)
+        if ctx_data:
+            ctx = RequestContext.from_dict(ctx_data)
+            with bind_context(ctx):
+                return self.run(*args, **kwargs)
+        return self.run(*args, **kwargs)
