@@ -58,10 +58,7 @@ class InvitationService:
 
         # 1. Assert user doesn't already exist in the organization
         existing_user = await self.uow.session.scalar(
-            select(User).where(
-                User.email == data.email.strip().lower(),
-                User.tenant_id == tenant_id,
-            )
+            select(User).where(User.email == data.email.strip().lower())
         )
         if existing_user:
             raise ServiceError(
@@ -72,7 +69,6 @@ class InvitationService:
         pending = await self.uow.session.scalar(
             select(Invitation).where(
                 Invitation.email == data.email.strip().lower(),
-                Invitation.tenant_id == tenant_id,
                 Invitation.status == InvitationStatus.PENDING,
             )
         )
@@ -107,12 +103,11 @@ class InvitationService:
 
     async def list_invitations(
         self,
-        tenant_id: UUID,
         status: InvitationStatus | None = None,
         pagination: PaginationParams = PaginationParams(),
     ) -> tuple[list[Invitation], int]:
         """List invitations for a tenant, optionally filtered by status, with pagination."""
-        stmt = select(Invitation).where(Invitation.tenant_id == tenant_id)
+        stmt = select(Invitation)
         if status:
             stmt = stmt.where(Invitation.status == status)
 
@@ -123,18 +118,16 @@ class InvitationService:
         result = await self.uow.session.scalars(paginated)
         return list(result.all()), total
 
-    async def get_invitation_by_id(
-        self, tenant_id: UUID, invitation_id: UUID
-    ) -> Invitation:
-        """Retrieve an invitation by ID, verifying tenant scoping."""
+    async def get_invitation_by_id(self, invitation_id: UUID) -> Invitation:
+        """Retrieve an invitation by ID."""
         invitation = await self.uow.session.get(Invitation, invitation_id)
-        if not invitation or invitation.tenant_id != tenant_id:
+        if not invitation:
             raise ServiceError("Invitation not found", status_code=404)
         return invitation
 
-    async def revoke_invitation(self, tenant_id: UUID, invitation_id: UUID) -> None:
+    async def revoke_invitation(self, invitation_id: UUID) -> None:
         """Revoke a pending invitation."""
-        invitation = await self.get_invitation_by_id(tenant_id, invitation_id)
+        invitation = await self.get_invitation_by_id(invitation_id)
         if invitation.status != InvitationStatus.PENDING:
             raise ServiceError("Cannot revoke this invitation", status_code=400)
 
@@ -149,7 +142,7 @@ class InvitationService:
         expires_in_days: int = 7,
     ) -> tuple[Invitation, str]:
         """Regenerate a fresh token and extend expiry for an existing invitation."""
-        invitation = await self.get_invitation_by_id(tenant_id, invitation_id)
+        invitation = await self.get_invitation_by_id(invitation_id)
         if invitation.status != InvitationStatus.PENDING:
             raise ServiceError("Cannot resend this invitation", status_code=400)
 

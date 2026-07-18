@@ -24,10 +24,10 @@ async def test_cannot_demote_last_admin(uow):
     # Demoting the only active admin should fail
     with pytest.raises(ServiceError) as exc_info:
         await service.update_role(
-            tenant_id=tenant.id,
             target_user_id=admin.id,
             data=data,
             acting_user_id=uuid.uuid4(),  # Someone else acting
+            acting_user_role=UserRole.ADMIN,
         )
     assert exc_info.value.status_code == 400
 
@@ -45,8 +45,8 @@ async def test_cannot_deactivate_self(uow):
 
     with pytest.raises(ServiceError) as exc_info:
         await service.deactivate(
-            tenant_id=tenant.id,
             user_id=admin.id,
             acting_user_id=admin.id,
+            acting_user_role=UserRole.ADMIN,
         )
     assert exc_info.value.status_code == 400

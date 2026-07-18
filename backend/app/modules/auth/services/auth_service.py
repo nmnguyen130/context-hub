@@ -83,12 +83,14 @@ class AuthService:
             raise ServiceError("Invalid or expired refresh token", status_code=401)
 
         user_id = UUID(payload["sub"])
+        tenant_id = UUID(payload["tenant_id"])
         token_hash = hash_token(refresh_token_str)
 
         # Retrieve active stored token
         stored_token = await self.uow.session.scalar(
             select(RefreshToken).where(
                 RefreshToken.token_hash == token_hash,
+                RefreshToken.tenant_id == tenant_id,
                 RefreshToken.revoked_at.is_(None),
             )
         )
@@ -100,12 +102,12 @@ class AuthService:
 
         # Get User details
         user = await self.uow.session.get(User, user_id)
-        if not user or not user.is_active:
+        if not user or not user.is_active or user.tenant_id != tenant_id:
             raise ServiceError("User account is inactive or not found", status_code=401)
 
         # Get Tenant details to check active status and get plan_tier
         tenant = await self.tenant_service.get_by_id(user.tenant_id)
-        if not tenant or not tenant.is_active:
+        if not tenant or not tenant.is_active or tenant.id != tenant_id:
             raise ServiceError(
                 "Tenant organization is inactive or not found", status_code=401
             )
@@ -135,10 +137,17 @@ class AuthService:
 
     async def logout(self, refresh_token_str: str) -> None:
         """Revoke an active refresh token session, marking it as logged out."""
+        try:
+            payload = decode_token(refresh_token_str, expected_type="refresh")
+            tenant_id = UUID(payload["tenant_id"])
+        except Exception:
+            raise ServiceError("Invalid refresh token", status_code=400)
+
         token_hash = hash_token(refresh_token_str)
         token = await self.uow.session.scalar(
             select(RefreshToken).where(
                 RefreshToken.token_hash == token_hash,
+                RefreshToken.tenant_id == tenant_id,
                 RefreshToken.revoked_at.is_(None),
             )
         )
@@ -146,11 +155,12 @@ class AuthService:
             token.revoked_at = datetime.now(UTC)
             await self.uow.flush()
 
-    async def logout_all_devices(self, user_id: UUID) -> int:
-        """Revoke all active refresh token sessions for a specific user."""
+    async def logout_all(self, tenant_id: UUID, user_id: UUID) -> int:
+        """Revoke all active refresh token sessions for a specific user within a tenant."""
         stmt = (
             update(RefreshToken)
             .where(
+                RefreshToken.tenant_id == tenant_id,
                 RefreshToken.user_id == user_id,
                 RefreshToken.revoked_at.is_(None),
             )

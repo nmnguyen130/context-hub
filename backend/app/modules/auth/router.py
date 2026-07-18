@@ -126,7 +126,7 @@ async def get_current_user(
     user_service: UserService = Depends(get_service(UserService)),
 ):
     """Retrieve the current authenticated user profile."""
-    return await user_service.get_user(context.tenant_id, context.user_id)
+    return await user_service.get_user(context.user_id)
 
 
 @auth_router.put("/users/me/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -144,12 +144,11 @@ async def change_password(
 async def list_users(
     pagination: PaginationParams = Depends(),
     is_active: bool | None = None,
-    context: RequestContext = Depends(get_authenticated_context),
     user_service: UserService = Depends(get_service(UserService)),
 ):
     """Lists all users belonging to the current tenant organization."""
     users, total = await user_service.list_users(
-        tenant_id=context.tenant_id, pagination=pagination, is_active=is_active
+        pagination=pagination, is_active=is_active
     )
     return PaginatedResponse[UserResponse].create(
         items=users, total=total, pagination=pagination
@@ -165,7 +164,6 @@ async def update_user_role(
 ):
     """Updates a user's role. Admin only."""
     user = await user_service.update_role(
-        tenant_id=context.tenant_id,
         target_user_id=user_id,
         data=data,
         acting_user_id=context.user_id,
@@ -183,7 +181,6 @@ async def deactivate_user(
 ):
     """Deactivates a user's account and terminates their sessions. Admin only."""
     await user_service.deactivate(
-        tenant_id=context.tenant_id,
         user_id=user_id,
         acting_user_id=context.user_id,
         acting_user_role=context.role,
@@ -199,7 +196,6 @@ async def reactivate_user(
 ):
     """Reactivates a deactivated user's account. Admin only."""
     await user_service.reactivate(
-        tenant_id=context.tenant_id,
         user_id=user_id,
         acting_user_role=context.role,
     )
@@ -229,16 +225,19 @@ async def create_invitation(
     return invitation
 
 
-@auth_router.get("/invitations", response_model=PaginatedResponse[InvitationResponse])
+@auth_router.get(
+    "/invitations",
+    response_model=PaginatedResponse[InvitationResponse],
+    dependencies=[Depends(require_roles(UserRole.ADMIN, UserRole.OWNER))],
+)
 async def list_invitations(
     pagination: PaginationParams = Depends(),
     status: InvitationStatus | None = None,
-    context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
     """Lists all invitations sent from this tenant. Admin only."""
     items, total = await invite_service.list_invitations(
-        tenant_id=context.tenant_id, status=status, pagination=pagination
+        status=status, pagination=pagination
     )
     return PaginatedResponse[InvitationResponse].create(
         items=items, total=total, pagination=pagination
@@ -246,17 +245,16 @@ async def list_invitations(
 
 
 @auth_router.post(
-    "/invitations/{invitation_id}/revoke", status_code=status.HTTP_204_NO_CONTENT
+    "/invitations/{invitation_id}/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles(UserRole.ADMIN, UserRole.OWNER))],
 )
 async def revoke_invitation(
     invitation_id: UUID,
-    context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
     """Revokes a pending invitation. Admin only."""
-    await invite_service.revoke_invitation(
-        tenant_id=context.tenant_id, invitation_id=invitation_id
-    )
+    await invite_service.revoke_invitation(invitation_id=invitation_id)
     await invite_service.uow.commit()
 
 

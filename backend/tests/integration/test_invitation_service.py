@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 
+from app.core.context import UserRole
 from app.core.exceptions import ServiceError
 from app.modules.auth.models import InvitationStatus
 from app.modules.auth.schemas import InvitationCreate
@@ -25,11 +26,12 @@ async def test_create_and_list_invitations(uow):
         tenant_id=tenant.id,
         invited_by=user.id,
         data=data,
+        acting_user_role=UserRole.ADMIN,
     )
     assert invite.email == "invite@test.com"
     assert token is not None
 
-    items, total = await service.list_invitations(tenant_id=tenant.id)
+    items, total = await service.list_invitations()
     assert total == 1
     assert items[0].email == "invite@test.com"
 
@@ -45,5 +47,5 @@ async def test_revoke_invitation(uow):
     uow.session.add(invite)
     await uow.flush()
 
-    await service.revoke_invitation(tenant_id=tenant.id, invitation_id=invite.id)
+    await service.revoke_invitation(invitation_id=invite.id)
     assert invite.status == InvitationStatus.REVOKED

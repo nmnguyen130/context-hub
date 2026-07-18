@@ -18,9 +18,8 @@ class UserService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def _count_active_admins(self, tenant_id: UUID) -> int:
+    async def _count_active_admins(self) -> int:
         stmt = select(func.count(User.id)).where(
-            User.tenant_id == tenant_id,
             User.role == UserRole.ADMIN,
             User.is_active.is_(True),
         )
@@ -39,12 +38,11 @@ class UserService:
 
     async def list_users(
         self,
-        tenant_id: UUID,
         pagination: PaginationParams = PaginationParams(),
         is_active: bool | None = None,
     ) -> tuple[list[User], int]:
         """List users belonging to a tenant organization with pagination."""
-        stmt = select(User).where(User.tenant_id == tenant_id)
+        stmt = select(User)
         if is_active is not None:
             stmt = stmt.where(User.is_active == is_active)
 
@@ -55,16 +53,15 @@ class UserService:
         items = (await self.uow.session.scalars(paginated)).all()
         return list(items), total
 
-    async def get_user(self, tenant_id: UUID, user_id: UUID) -> User:
-        """Retrieve a single user, raising 404 if not found or scoped to another tenant."""
+    async def get_user(self, user_id: UUID) -> User:
+        """Retrieve a single user, raising 404 if not found."""
         user = await self.uow.session.get(User, user_id)
-        if not user or user.tenant_id != tenant_id:
+        if not user:
             raise ServiceError("User not found", status_code=404)
         return user
 
     async def update_role(
         self,
-        tenant_id: UUID,
         target_user_id: UUID,
         data: UserUpdate,
         acting_user_id: UUID,
@@ -74,7 +71,7 @@ class UserService:
         if target_user_id == acting_user_id:
             raise ServiceError("Admins cannot modify their own roles", status_code=400)
 
-        user = await self.get_user(tenant_id, target_user_id)
+        user = await self.get_user(target_user_id)
 
         # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
@@ -89,7 +86,7 @@ class UserService:
             )
 
         if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
-            admin_count = await self._count_active_admins(tenant_id)
+            admin_count = await self._count_active_admins()
             if admin_count <= 1:
                 raise ServiceError(
                     "Cannot demote the only remaining active Administrator",
@@ -102,9 +99,7 @@ class UserService:
 
     async def change_password(self, user_id: UUID, data: ChangePasswordRequest) -> None:
         """Update a user's password, forcing a revocation of all active sessions."""
-        user = await self.uow.session.get(User, user_id)
-        if not user:
-            raise ServiceError("User not found", status_code=404)
+        user = await self.get_user(user_id)
 
         if not verify_password(data.current_password, user.hashed_password):
             raise ServiceError("Incorrect current password", status_code=400)
@@ -115,7 +110,6 @@ class UserService:
 
     async def deactivate(
         self,
-        tenant_id: UUID,
         user_id: UUID,
         acting_user_id: UUID,
         acting_user_role: UserRole,
@@ -126,7 +120,7 @@ class UserService:
                 "Admins cannot deactivate their own accounts", status_code=400
             )
 
-        user = await self.get_user(tenant_id, user_id)
+        user = await self.get_user(user_id)
         if not user.is_active:
             return
 
@@ -138,7 +132,7 @@ class UserService:
             )
 
         if user.role == UserRole.ADMIN:
-            admin_count = await self._count_active_admins(tenant_id)
+            admin_count = await self._count_active_admins()
             if admin_count <= 1:
                 raise ServiceError(
                     "Cannot deactivate the only remaining active Administrator",
@@ -151,12 +145,11 @@ class UserService:
 
     async def reactivate(
         self,
-        tenant_id: UUID,
         user_id: UUID,
         acting_user_role: UserRole,
     ) -> None:
         """Reactivate a deactivated user's account, enforcing role hierarchy."""
-        user = await self.get_user(tenant_id, user_id)
+        user = await self.get_user(user_id)
         if user.is_active:
             return
 
