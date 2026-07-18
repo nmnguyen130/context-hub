@@ -36,7 +36,9 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_access_token(user_id: UUID, tenant_id: UUID, role: UserRole) -> str:
+def create_access_token(
+    user_id: UUID, tenant_id: UUID, role: UserRole, plan: str = "free"
+) -> str:
     """Creates a signed JWT access token."""
     expires = datetime.now(UTC) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -45,6 +47,7 @@ def create_access_token(user_id: UUID, tenant_id: UUID, role: UserRole) -> str:
         "sub": str(user_id),
         "tenant_id": str(tenant_id),
         "role": role.value,
+        "plan": plan,
         "type": "access",
         "jti": uuid.uuid4().hex,
         "exp": expires,

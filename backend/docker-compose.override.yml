@@ -2,15 +2,16 @@ services:
   api:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      - ./app:/workspace/app
-      - ./tests:/workspace/tests
-      - ./alembic:/workspace/alembic
-      - ./alembic.ini:/workspace/alembic.ini
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./pyproject.toml:/app/pyproject.toml
 
   worker:
     volumes:
-      - ./app:/workspace/app
+      - ./app:/app/app
 
   relay:
     volumes:
-      - ./app:/workspace/app
+      - ./app:/app/app

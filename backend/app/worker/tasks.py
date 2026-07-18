@@ -33,3 +33,6 @@ class ContextTask(Task):
             with bind_context(ctx):
                 return self.run(*args, **kwargs)
         return self.run(*args, **kwargs)
+
+
+celery_app.Task = ContextTask

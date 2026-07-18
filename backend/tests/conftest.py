@@ -1,89 +1,96 @@
-# tests/conftest.py
+import asyncio
 import uuid
+from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from app.core.enums import UserRole
-from app.core.event_bus import event_bus
-from sqlalchemy import text
+from fastapi import Depends
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.dependencies import get_authenticated_context, get_public_uow, get_uow
 from app.core.config import settings
-from app.core.context import RequestContext, bind_context
+from app.core.context import RequestContext, UserRole, bind_context, current_context
 from app.core.database import Base
 from app.core.uow import UnitOfWork
-from tests.models import MockScopedModel, MockTenant
+from app.main import app
+
+TEST_DATABASE_URL = settings.DATABASE_URL.replace(f"/{settings.POSTGRES_DB}", f"/{settings.POSTGRES_DB}_test")
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="session")
 async def test_engine():
-    """Function-scoped database engine to avoid event loop conflicts."""
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-
-    # Dynamically create test tables and configure RLS
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            text("GRANT ALL PRIVILEGES ON mock_tenants TO app_user, app_admin")
-        )
-        await conn.execute(
-            text("GRANT ALL PRIVILEGES ON mock_scoped_models TO app_user, app_admin")
-        )
-        await conn.execute(
-            text("ALTER TABLE mock_scoped_models ENABLE ROW LEVEL SECURITY")
-        )
-        await conn.execute(
-            text("ALTER TABLE mock_scoped_models FORCE ROW LEVEL SECURITY")
-        )
-        await conn.execute(
-            text("DROP POLICY IF EXISTS tenant_isolation ON mock_scoped_models")
-        )
-        await conn.execute(
-            text("""
-            CREATE POLICY tenant_isolation ON mock_scoped_models
-            USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-        """)
-        )
-
     yield engine
-
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def clean_database(test_engine):
+    """Automatically cleans all database tables before each test to ensure isolation."""
+    async with test_engine.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(table.delete())
+
+
 @pytest_asyncio.fixture
-async def db_session(test_engine):
-    """Function-scoped session wrapped in a transaction that always rolls back."""
-    session_factory = async_sessionmaker(
-        bind=test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
-    )
+async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+    """Provides a database session for test setup."""
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with session_factory() as session:
-        await session.begin()
         yield session
-        await session.rollback()
+        await session.commit()
 
 
 @pytest_asyncio.fixture
-async def test_uow(db_session):
-    context = RequestContext(
-        request_id="test_req",
-        correlation_id="test_corr",
+async def uow(test_engine) -> AsyncGenerator[UnitOfWork, None]:
+    """Provides an admin-bypassed Unit of Work targeting the test database."""
+    ctx = RequestContext(
+        request_id="test-req",
+        trace_id="test-trace",
         tenant_id=uuid.uuid4(),
-        actor_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
         role=UserRole.ADMIN,
-        is_platform_admin=True,
     )
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    async with UnitOfWork(
+        session_factory=session_factory, context=ctx, is_admin=True
+    ) as unit:
+        yield unit
 
-    class DummySessionFactory:
-        def __call__(self):
-            return db_session
 
-    uow = UnitOfWork(
-        session_factory=DummySessionFactory(),
-        context=context,
-        event_bus=event_bus,
-        admin_session_factory=DummySessionFactory(),
-    )
-    with bind_context(context):
-        yield uow
+@pytest_asyncio.fixture
+async def async_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
+    """Provides an AsyncClient with database dependencies overridden to target the test database."""
+    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+
+    async def override_get_uow(
+        context: RequestContext = Depends(get_authenticated_context),
+    ):
+        async with UnitOfWork(
+            session_factory=session_factory,
+            context=context,
+            is_admin=False,
+        ) as unit:
+            yield unit
+
+    async def override_get_public_uow():
+        async with UnitOfWork(
+            session_factory=session_factory,
+            context=current_context(),
+            is_admin=True,
+        ) as unit:
+            yield unit
+
+    app.dependency_overrides[get_uow] = override_get_uow
+    app.dependency_overrides[get_public_uow] = override_get_public_uow
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+    app.dependency_overrides.clear()

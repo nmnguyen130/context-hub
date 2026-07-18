@@ -4,7 +4,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Mapping
 
-from sqlalchemy import JSON, DateTime, Enum, Integer, String, func
+from sqlalchemy import DateTime, Enum, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -27,8 +28,11 @@ class DomainEventsMixin:
             self._domain_events = []
         return self._domain_events
 
-    def record_event(self, event: DomainEvent) -> None:
-        self.domain_events.append(event)
+    def record_event(self, event_type: str, payload: dict | None = None) -> None:
+        """Convenience method to record a domain event."""
+        self.domain_events.append(
+            DomainEvent(event_type=event_type, payload=payload or {})
+        )
 
     def pull_events(self) -> list[DomainEvent]:
         events = list(self.domain_events)
@@ -49,7 +53,7 @@ class OutboxEvent(Base):
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
 
     event_type: Mapped[str] = mapped_column(String(100), index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     status: Mapped[OutboxStatus] = mapped_column(
         Enum(OutboxStatus), default=OutboxStatus.PENDING, index=True
     )

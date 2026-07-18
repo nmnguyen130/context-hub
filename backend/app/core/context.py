@@ -7,10 +7,27 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
+    SUPER_ADMIN = "SUPER_ADMIN"
     OWNER = "OWNER"
     ADMIN = "ADMIN"
     MEMBER = "MEMBER"
     VIEWER = "VIEWER"
+
+    @property
+    def priority(self) -> int:
+        return {
+            UserRole.SUPER_ADMIN: 5,
+            UserRole.OWNER: 4,
+            UserRole.ADMIN: 3,
+            UserRole.MEMBER: 2,
+            UserRole.VIEWER: 1,
+        }[self]
+
+    def has_higher_privilege_than(self, other: "UserRole") -> bool:
+        """Check if this role has strictly higher authority than the other."""
+        if self == UserRole.SUPER_ADMIN:
+            return True
+        return self.priority > other.priority
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +37,7 @@ class RequestContext:
     tenant_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
     role: UserRole | None = None
+    plan: str = "free"
 
     def to_dict(self) -> dict[str, str | None]:
         return {
@@ -28,6 +46,7 @@ class RequestContext:
             "tenant_id": str(self.tenant_id) if self.tenant_id else None,
             "user_id": str(self.user_id) if self.user_id else None,
             "role": self.role,
+            "plan": self.plan,
         }
 
     @classmethod
@@ -38,6 +57,7 @@ class RequestContext:
             tenant_id=uuid.UUID(data["tenant_id"]) if data.get("tenant_id") else None,
             user_id=uuid.UUID(data["user_id"]) if data.get("user_id") else None,
             role=UserRole(data["role"]) if data.get("role") else None,
+            plan=data.get("plan") or "free",
         )
 
 

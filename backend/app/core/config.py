@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,6 +40,7 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str | None = None
     S3_SECRET_KEY: str | None = None
     S3_BUCKET_NAME: str = "contexthub"
+    S3_REGION_NAME: str = "us-east-1"
     S3_SECURE: bool = True
     MAX_FILE_SIZE_MB: int = 20
 
@@ -79,4 +82,9 @@ class Settings(BaseSettings):
         return self
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

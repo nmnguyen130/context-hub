@@ -7,7 +7,10 @@ from typing import Callable, Protocol
 from fastapi import HTTPException, Request, Response, status
 from redis.exceptions import RedisError
 
+from app.core.context import try_current_context
+
 logger = logging.getLogger(__name__)
+
 
 # Lua script to perform sliding window rate limit atomically.
 # Utilizes Redis-side clock (via redis.call('time')) to prevent clock drift.
@@ -71,12 +74,9 @@ class PlanPolicyProvider(LimitPolicyProvider):
 
     def get_policy(self, request: Request) -> RateLimitPolicy:
         """Resolves policy by evaluating subscription tier."""
-        identity = getattr(request.state, "identity", None)
-        requests = self.default_requests
-
-        if identity:
-            plan = getattr(identity, "plan", "free").lower()
-            requests = {"enterprise": 2000, "pro": 500}.get(plan, self.default_requests)
+        ctx = try_current_context()
+        plan = ctx.plan if ctx else "free"
+        requests = {"enterprise": 2000, "pro": 500}.get(plan.lower(), self.default_requests)
 
         return RateLimitPolicy(
             key_prefix="api",
@@ -107,18 +107,18 @@ class RateLimiter:
           3. Tenant only: `rate_limit:tenant:{tenant_id}:{policy_prefix}:{route_path}`
           4. IP (Anonymous): `rate_limit:ip:{client_ip}:{policy_prefix}:{route_path}`
         """
-        identity = getattr(request.state, "identity", None)
         api_key = request.headers.get("x-api-key")
-
         if api_key:
             target = f"apikey:{hashlib.sha256(api_key.encode()).hexdigest()}"
-        elif identity and getattr(identity, "user_id", None):
-            target = f"tenant:{identity.tenant_id}:user:{identity.user_id}"
-        elif identity and getattr(identity, "tenant_id", None):
-            target = f"tenant:{identity.tenant_id}"
         else:
-            client_ip = request.client.host if request.client else "unknown"
-            target = f"ip:{client_ip}"
+            ctx = try_current_context()
+            if ctx and ctx.user_id:
+                target = f"tenant:{ctx.tenant_id}:user:{ctx.user_id}"
+            elif ctx and ctx.tenant_id:
+                target = f"tenant:{ctx.tenant_id}"
+            else:
+                client_ip = request.client.host if request.client else "unknown"
+                target = f"ip:{client_ip}"
 
         route = request.scope.get("route")
         route_path = route.path if route else request.url.path
@@ -153,7 +153,9 @@ class RateLimiter:
             )
         except RedisError as e:
             logger.exception(
-                f"Redis rate limit check failed for key '{key}': {e}. Skipping rate limiting.",
+                "Redis rate limit check failed for key '%s': %s. Skipping rate limiting.",
+                key,
+                e,
             )
 
             if self.fail_open:

@@ -1,5 +1,5 @@
-from collections.abc import AsyncIterator, BinaryIO
-from typing import Protocol
+from collections.abc import AsyncIterator
+from typing import BinaryIO, Protocol
 
 import aioboto3
 from botocore.config import Config

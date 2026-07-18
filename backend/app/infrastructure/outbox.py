@@ -66,9 +66,10 @@ async def process_outbox_event(
                     },
                 )
                 event.status = OutboxStatus.SENT
+                event.processed_at = datetime.now(UTC)
 
             except Exception as exc:
-                logger.exception(f"Failed dispatching outbox event {event.id}")
+                logger.exception("Failed dispatching outbox event %s", event.id)
                 event.retry_count += 1
                 event.error_message = str(exc)[:500]
 
@@ -93,7 +94,7 @@ async def run_outbox_relay(
             try:
                 await process_outbox_event(session_factory, event_id)
             except Exception:
-                logger.exception(f"Outbox processing failed for {event_id}")
+                logger.exception("Outbox processing failed for %s", event_id)
 
     while True:
         try:

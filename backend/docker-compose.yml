@@ -9,7 +9,7 @@ x-python-service: &python-service
   environment:
     POSTGRES_HOST: db
     REDIS_HOST: redis
-    PYTHONPATH: /workspace
+    PYTHONPATH: /app
   restart: unless-stopped
 
 services:
