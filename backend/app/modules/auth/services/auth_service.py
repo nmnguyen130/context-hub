@@ -7,7 +7,7 @@ from app.core.exceptions import ServiceError
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import RefreshToken, User
 from app.modules.auth.schemas import LoginRequest, TokenResponse
-from app.modules.tenant.models import Tenant
+from app.modules.tenant.services import TenantService
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -22,15 +22,16 @@ class AuthService:
 
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
+        self.tenant_service = TenantService(uow)
 
     async def login(self, data: LoginRequest, tenant_slug: str) -> TokenResponse:
         """Authenticate a user, update last login timestamp, and issue JWT tokens."""
         # 1. Resolve Tenant
-        tenant = await self.uow.session.scalar(
-            select(Tenant).where(Tenant.slug == tenant_slug.strip().lower())
-        )
+        tenant = await self.tenant_service.get_by_slug(tenant_slug)
         if not tenant or not tenant.is_active:
-            raise ServiceError("Incorrect email, password, or tenant slug", status_code=401)
+            raise ServiceError(
+                "Incorrect email, password, or tenant slug", status_code=401
+            )
 
         # 2. Resolve User within the resolved tenant
         user = await self.uow.session.scalar(
@@ -39,8 +40,14 @@ class AuthService:
                 User.tenant_id == tenant.id,
             )
         )
-        if not user or not verify_password(data.password, user.hashed_password) or not user.is_active:
-            raise ServiceError("Incorrect email, password, or tenant slug", status_code=401)
+        if (
+            not user
+            or not verify_password(data.password, user.hashed_password)
+            or not user.is_active
+        ):
+            raise ServiceError(
+                "Incorrect email, password, or tenant slug", status_code=401
+            )
 
         # 3. Update last login timestamp
         user.last_login_at = datetime.now(UTC)
@@ -97,9 +104,11 @@ class AuthService:
             raise ServiceError("User account is inactive or not found", status_code=401)
 
         # Get Tenant details to check active status and get plan_tier
-        tenant = await self.uow.session.get(Tenant, user.tenant_id)
+        tenant = await self.tenant_service.get_by_id(user.tenant_id)
         if not tenant or not tenant.is_active:
-            raise ServiceError("Tenant organization is inactive or not found", status_code=401)
+            raise ServiceError(
+                "Tenant organization is inactive or not found", status_code=401
+            )
 
         # Revoke old refresh token
         stored_token.revoked_at = datetime.now(UTC)

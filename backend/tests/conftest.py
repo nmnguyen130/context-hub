@@ -15,7 +15,9 @@ from app.core.database import Base
 from app.core.uow import UnitOfWork
 from app.main import app
 
-TEST_DATABASE_URL = settings.DATABASE_URL.replace(f"/{settings.POSTGRES_DB}", f"/{settings.POSTGRES_DB}_test")
+TEST_DATABASE_URL = settings.DATABASE_URL.replace(
+    f"/{settings.POSTGRES_DB}", f"/{settings.POSTGRES_DB}_test"
+)
 
 
 @pytest_asyncio.fixture(scope="session")

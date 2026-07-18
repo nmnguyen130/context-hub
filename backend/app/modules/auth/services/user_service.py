@@ -78,16 +78,23 @@ class UserService:
 
         # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError("Cannot modify a user with equal or higher authority", status_code=403)
+            raise ServiceError(
+                "Cannot modify a user with equal or higher authority", status_code=403
+            )
 
         # Enforce target role limit: acting user cannot assign a role higher than their own
         if data.role.priority > acting_user_role.priority:
-            raise ServiceError("Cannot assign a role higher than your own", status_code=403)
+            raise ServiceError(
+                "Cannot assign a role higher than your own", status_code=403
+            )
 
         if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
             admin_count = await self._count_active_admins(tenant_id)
             if admin_count <= 1:
-                raise ServiceError("Cannot demote the only remaining active Administrator", status_code=400)
+                raise ServiceError(
+                    "Cannot demote the only remaining active Administrator",
+                    status_code=400,
+                )
 
         user.role = data.role
         await self.uow.flush()
@@ -115,7 +122,9 @@ class UserService:
     ) -> None:
         """Deactivate a user's account and revoke their active sessions, enforcing role hierarchy."""
         if user_id == acting_user_id:
-            raise ServiceError("Admins cannot deactivate their own accounts", status_code=400)
+            raise ServiceError(
+                "Admins cannot deactivate their own accounts", status_code=400
+            )
 
         user = await self.get_user(tenant_id, user_id)
         if not user.is_active:
@@ -123,12 +132,18 @@ class UserService:
 
         # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError("Cannot deactivate a user with equal or higher authority", status_code=403)
+            raise ServiceError(
+                "Cannot deactivate a user with equal or higher authority",
+                status_code=403,
+            )
 
         if user.role == UserRole.ADMIN:
             admin_count = await self._count_active_admins(tenant_id)
             if admin_count <= 1:
-                raise ServiceError("Cannot deactivate the only remaining active Administrator", status_code=400)
+                raise ServiceError(
+                    "Cannot deactivate the only remaining active Administrator",
+                    status_code=400,
+                )
 
         user.is_active = False
         await self._revoke_sessions(user_id)
@@ -147,7 +162,10 @@ class UserService:
 
         # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError("Cannot reactivate a user with equal or higher authority", status_code=403)
+            raise ServiceError(
+                "Cannot reactivate a user with equal or higher authority",
+                status_code=403,
+            )
 
         user.is_active = True
         await self.uow.flush()

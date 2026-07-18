@@ -1,7 +1,5 @@
 from uuid import UUID
 
-from pydantic import BaseModel
-
 from app.core.uow import UnitOfWork
 from app.modules.tenant.schemas import TenantStatsResponse
 

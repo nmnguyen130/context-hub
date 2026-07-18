@@ -51,7 +51,10 @@ class InvitationService:
         """Create a new invitation for a user to join a tenant organization."""
         # Enforce target role limit: acting user cannot invite a user with higher authority than their own
         if data.role.priority > acting_user_role.priority:
-            raise ServiceError("Cannot invite a user with higher authority than your own", status_code=403)
+            raise ServiceError(
+                "Cannot invite a user with higher authority than your own",
+                status_code=403,
+            )
 
         # 1. Assert user doesn't already exist in the organization
         existing_user = await self.uow.session.scalar(
@@ -61,7 +64,9 @@ class InvitationService:
             )
         )
         if existing_user:
-            raise ServiceError("User with this email is already a member", status_code=409)
+            raise ServiceError(
+                "User with this email is already a member", status_code=409
+            )
 
         # 2. Assert no other active pending invitation exists
         pending = await self.uow.session.scalar(
@@ -73,7 +78,9 @@ class InvitationService:
         )
         if pending:
             if pending.expires_at >= datetime.now(UTC):
-                raise ServiceError("A pending invitation already exists", status_code=409)
+                raise ServiceError(
+                    "A pending invitation already exists", status_code=409
+                )
             # Auto-expire outdated pending invitation
             pending.status = InvitationStatus.EXPIRED
             await self.uow.flush()

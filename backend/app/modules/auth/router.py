@@ -151,7 +151,9 @@ async def list_users(
     users, total = await user_service.list_users(
         tenant_id=context.tenant_id, pagination=pagination, is_active=is_active
     )
-    return PaginatedResponse[UserResponse].create(items=users, total=total, pagination=pagination)
+    return PaginatedResponse[UserResponse].create(
+        items=users, total=total, pagination=pagination
+    )
 
 
 @auth_router.patch("/users/{user_id}/role", response_model=UserResponse)
@@ -238,7 +240,9 @@ async def list_invitations(
     items, total = await invite_service.list_invitations(
         tenant_id=context.tenant_id, status=status, pagination=pagination
     )
-    return PaginatedResponse[InvitationResponse].create(items=items, total=total, pagination=pagination)
+    return PaginatedResponse[InvitationResponse].create(
+        items=items, total=total, pagination=pagination
+    )
 
 
 @auth_router.post(

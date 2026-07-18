@@ -66,7 +66,9 @@ async def list_tenants(
     items, total = await tenant_service.list(
         pagination=pagination, search=search, order_by=order_by
     )
-    return PaginatedResponse[TenantResponse].create(items=items, total=total, pagination=pagination)
+    return PaginatedResponse[TenantResponse].create(
+        items=items, total=total, pagination=pagination
+    )
 
 
 @tenants_router.get("/lookup/{slug}")

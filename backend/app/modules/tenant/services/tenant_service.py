@@ -50,11 +50,11 @@ class TenantService:
             "created_at": Tenant.created_at,
             "plan_tier": Tenant.plan_tier,
         }
-        
+
         normalized_order = order_by.lower().strip()
         if normalized_order not in order_columns:
             raise ServiceError(f"Invalid sort column: {order_by}", status_code=422)
-            
+
         sort_col = order_columns[normalized_order]
         stmt = stmt.order_by(sort_col)
 

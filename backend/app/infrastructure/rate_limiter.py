@@ -76,7 +76,9 @@ class PlanPolicyProvider(LimitPolicyProvider):
         """Resolves policy by evaluating subscription tier."""
         ctx = try_current_context()
         plan = ctx.plan if ctx else "free"
-        requests = {"enterprise": 2000, "pro": 500}.get(plan.lower(), self.default_requests)
+        requests = {"enterprise": 2000, "pro": 500}.get(
+            plan.lower(), self.default_requests
+        )
 
         return RateLimitPolicy(
             key_prefix="api",

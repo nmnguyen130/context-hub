@@ -2,10 +2,14 @@ from collections.abc import AsyncIterator
 
 from fastapi import Depends, HTTPException, status
 
-from app.core.context import RequestContext, UserRole, current_context, try_current_context
+from app.core.context import (
+    RequestContext,
+    UserRole,
+    current_context,
+    try_current_context,
+)
 from app.core.database import async_session
 from app.core.uow import UnitOfWork
-
 
 # 1. Security & Identity Context Extraction
 

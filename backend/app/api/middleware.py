@@ -29,9 +29,17 @@ class RequestContextMiddleware:
         if auth.startswith("Bearer "):
             try:
                 jwt_payload = decode_token(auth.split(" ")[1], expected_type="access")
-                tenant_id = uuid.UUID(jwt_payload["tenant_id"]) if jwt_payload.get("tenant_id") else None
-                user_id = uuid.UUID(jwt_payload["sub"]) if jwt_payload.get("sub") else None
-                role = UserRole(jwt_payload["role"]) if jwt_payload.get("role") else None
+                tenant_id = (
+                    uuid.UUID(jwt_payload["tenant_id"])
+                    if jwt_payload.get("tenant_id")
+                    else None
+                )
+                user_id = (
+                    uuid.UUID(jwt_payload["sub"]) if jwt_payload.get("sub") else None
+                )
+                role = (
+                    UserRole(jwt_payload["role"]) if jwt_payload.get("role") else None
+                )
                 plan = jwt_payload.get("plan", "free")
             except Exception:
                 pass
