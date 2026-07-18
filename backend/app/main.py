@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.api.middleware import RequestContextMiddleware
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import async_session, engine
+from app.core.database import app_engine, owner_engine, app_session
 from app.core.exceptions import register_exception_handlers
 from app.infrastructure.rate_limiter import LUA_SLIDING_WINDOW
 from app.infrastructure.storage import S3StorageProvider
@@ -33,7 +33,8 @@ async def lifespan(app: FastAPI):
 
     # Teardown
     await app.state.redis.aclose()
-    await engine.dispose()
+    await app_engine.dispose()
+    await owner_engine.dispose()
 
 
 app = FastAPI(
@@ -78,7 +79,7 @@ async def health_check(request: Request):
 
     # Check Database
     try:
-        async with async_session() as session:
+        async with app_session() as session:
             await session.execute(text("SELECT 1"))
         db_ok = True
     except Exception:

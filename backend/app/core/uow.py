@@ -30,10 +30,8 @@ class UnitOfWork:
             await self.session.begin()
 
         if self._is_admin:
-            # Bypass Row-Level Security for administrative/global queries
-            await self.session.execute(
-                text("SELECT set_config('app.bypass_rls', 'true', true)")
-            )
+            # Owner pool — superuser / owner bypasses RLS naturally, no GUC needed
+            pass
         else:
             # Enforce Row-Level Security by binding active tenant ID
             if self._context.tenant_id is None:
@@ -52,9 +50,11 @@ class UnitOfWork:
             if exc_type is not None:
                 await self.rollback()
             elif self.session and self.session.in_transaction():
-                logger.warning(
-                    "UnitOfWork exited without commit(); rolling back transaction."
-                )
+                # Only log warning if transaction has pending mutations that were not committed
+                if self.session.new or self.session.dirty or self.session.deleted:
+                    logger.warning(
+                        "UnitOfWork exited with pending changes but without commit(); rolling back transaction."
+                    )
                 await self.rollback()
         finally:
             if self.session:

@@ -1,73 +1,73 @@
 # ContextHub Testing Guide
 
-A clean and minimal reference for the backend test suite.
+This document details the configuration and execution of the backend test suite, outlining the database roles, multi-tenancy testing isolation, and a catalog of all tests.
 
----
+## Running Tests
 
-## 🚀 How to Run Tests
-
-Run commands inside the `api` container:
+All tests run inside the `api` container:
 
 ```bash
 # Run all tests
-docker compose exec api env PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/app pytest
+docker compose exec api pytest
 
-# Run by markers
-docker compose exec api env PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/app pytest -m unit
-docker compose exec api env PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/app pytest -m integration
+# Run by directories
+docker compose exec api pytest tests/unit
+docker compose exec api pytest tests/integration
+docker compose exec api pytest tests/api
 ```
 
----
+## Testing Database and Roles Architecture
 
-## 🛠️ Testing Environment
+To enforce Row-Level Security (RLS) in tests, the test environment separates the migration owner role from the application query connection:
 
-We use **Pytest + Pytest-Asyncio + HTTPX** without external database mocking engines.
+* **Superuser / Owner (postgres)**: Alembic migrations run in a subprocess under this superuser role via the `DATABASE_OWNER_URL` environment override to create tables and RLS policies on `contexthub_test`.
+* **Application / Test Client (contexthub_app)**: The pytest engine executes test queries under this non-superuser role via `DATABASE_URL` to query `contexthub_test` with active RLS enforcement.
 
-### Fixtures (`tests/conftest.py`)
+## Session and Transaction Isolation
 
-| Fixture | Scope | Description |
-| :--- | :--- | :--- |
-| `test_engine` | `session` | Creates the Postgres schema once at test session startup and drops it on exit. |
-| `clean_database` | `function` | Autouse. Truncates all tables in reverse dependency order before each test. |
-| `db_session` | `function` | Setup database session. Automatically commits so the API client can read mock data. |
-| `uow` | `function` | Admin-mode Unit of Work to set up tests bypassing RLS policies. |
-| `async_client` | `function` | FastAPI HTTPX AsyncClient with database session dependencies overridden to point to the test DB. |
+We use SQLAlchemy connection pooling. To prevent connection states (like `app.bypass_rls = 'true'`) from leaking across pooled connections:
 
-### Configuration (`pyproject.toml`)
+1. **Transaction-Local Configuration**: `db_session` fixture uses a session-level `after_begin` event listener to set `app.bypass_rls = 'true'` at the start of every transaction for test setup.
+2. **Application Guard**: `UnitOfWork` (in `app/core/uow.py`) explicitly resets `app.bypass_rls` to `'false'` at the beginning of all non-admin transactions, ensuring RLS enforcement is always active on pooled connection checkouts.
 
-To prevent event loop mismatch errors when reusing connection pools, both tests and fixtures are locked to a single session-scoped loop:
-```toml
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
-```
+## Pytest Fixtures
 
----
+* `test_engine`: Runs Alembic migrations on `contexthub_test` as database owner, then yields the engine.
+* `clean_database`: Autouse fixture that truncates all tables before each test by temporarily bypassing RLS.
+* `db_session`: Session helper with RLS bypassed to set up test mock data.
+* `uow`: Admin-mode Unit of Work to set up test fixtures.
+* `async_client`: FastAPI HTTPX AsyncClient with overridden database session pointing to `contexthub_test`.
 
-## 📋 Test Matrix
+## Test Catalog
 
-### 1. Unit Tests (`tests/unit/`)
-*Pure logic checks with zero external network or database connections.*
+### Unit Tests (tests/unit/)
 
-- **Context** (`test_context.py`): Thread-local request context isolation and dictionary serialization roundtrips.
-- **Config** (`test_config.py`): Pydantic settings validations (CORS wildcard rejection, JWT secret minimum length).
-- **Domain Events** (`test_events.py`): Event recording, pulling, and queue clearing on aggregate roots.
-- **Security** (`test_security.py`): Bcrypt hashing checks, 72-byte password truncation limits, JWT token generation & verification.
-- **Slugs** (`test_slug.py`): Slug generation formatting and normalization rules.
+* **test_security_context.py**
+  * `test_bcrypt_password_hashing`: Verifies password hashing, matching verification, and failure cases.
+  * `test_jwt_access_and_refresh_tokens`: Verifies JWT payload claims (claims, jti, type validation) for access and refresh tokens.
+  * `test_jwt_decode_type_validation`: Verifies decode raises ValueError on token type mismatches.
+  * `test_request_context_propagation`: Verifies RequestContext thread-local storage propagation using context managers.
 
-### 2. Integration Tests (`tests/integration/`)
-*Verifies database operations, RLS constraints, and transactional unit of work.*
+### Integration Tests (tests/integration/)
 
-- **UoW** (`test_uow.py`): Unit of work commit persistence and rollback safety.
-- **Tenant** (`test_tenant_service.py`): Tenant registration, profile updates, slug constraints, and soft-delete states.
-- **Auth** (`test_auth_service.py`): Login logic (password validation, deactivated accounts) and JWT refresh session rotation.
-- **Registration** (`test_registration.py`): Tenant self-registration and joining organizations via invitation tokens.
-- **Users** (`test_user_service.py`): Role management constraints and deactivation lockout protections.
-- **Invitations** (`test_invitation_service.py`): Invitation workflows (creation, list, and revocation).
+* **test_rls_isolation.py**
+  * `test_rls_select_isolation`: Verifies that a tenant-scoped session cannot query or fetch rows belonging to other tenants.
+  * `test_rls_insert_violation`: Verifies that trying to write another tenant's data raises a DBAPIError containing RLS violation messages.
 
-### 3. API Endpoint Tests (`tests/api/`)
-*Simulates client-side HTTP calls against FastAPI routers with overridden DB dependencies.*
+* **test_services.py**
+  * `test_user_service_cannot_demote_last_admin`: Verifies that UserService rejects demoting a tenant's last admin.
+  * `test_user_service_cannot_deactivate_self`: Verifies that UserService rejects self-deactivation.
+  * `test_invitation_service_flow`: Verifies invitation creation, retrieval, listing, and revocation.
 
-- **Health** (`test_health.py`): `GET /health` probe checks.
-- **Auth** (`test_auth_endpoints.py`): Registration and login endpoints (JWT token response payload validations).
-- **Tenant** (`test_tenant_endpoints.py`): Current tenant retrieval, patching metadata, and public slug lookups.
-- **Users** (`test_user_endpoints.py`): Listing tenant users, role updates, and RBAC restrictions.
+### API Endpoint Tests (tests/api/)
+
+* **test_auth.py**
+  * `test_register_new_tenant_and_admin`: Tests new tenant/admin registration endpoint (`POST /auth/register`).
+  * `test_login_returns_jwt_tokens`: Tests authentication login endpoint (`POST /auth/login`).
+
+* **test_tenant_users.py**
+  * `test_get_current_tenant_details`: Tests tenant retrieval endpoint (`GET /tenant`).
+  * `test_patch_tenant_admin_only`: Tests tenant settings update (`PATCH /tenant`) is restricted to admins.
+  * `test_role_update_rejected_for_members`: Tests that member role modification is rejected.
+  * `test_api_tenant_isolation_list`: Tests that listing users returns only current tenant members.
+  * `test_api_tenant_isolation_update`: Tests that updating a user from another tenant returns a 404 error due to RLS isolation.

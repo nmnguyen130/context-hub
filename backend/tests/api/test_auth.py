@@ -1,5 +1,4 @@
 import uuid
-
 import pytest
 from httpx import AsyncClient
 
@@ -8,13 +7,8 @@ from app.utils.security import create_access_token
 from tests.factories import make_tenant, make_user
 
 
-def get_headers(user_id: uuid.UUID, tenant_id: uuid.UUID, role: UserRole) -> dict:
-    token = create_access_token(user_id, tenant_id, role)
-    return {"Authorization": f"Bearer {token}"}
-
-
 @pytest.mark.integration
-async def test_register_201(async_client: AsyncClient, db_session):
+async def test_register_new_tenant_and_admin(async_client: AsyncClient, db_session):
     payload = {
         "tenant_name": "API Register Corp",
         "email": "apireg@test.com",
@@ -28,7 +22,7 @@ async def test_register_201(async_client: AsyncClient, db_session):
 
 
 @pytest.mark.integration
-async def test_login_returns_tokens(async_client: AsyncClient, db_session):
+async def test_login_returns_jwt_tokens(async_client: AsyncClient, db_session):
     tenant = make_tenant(slug="api-login")
     db_session.add(tenant)
     await db_session.commit()

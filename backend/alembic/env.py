@@ -21,7 +21,7 @@ target_metadata = metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = settings.DATABASE_URL
+    url = settings.DATABASE_OWNER_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -53,7 +53,7 @@ async def run_async_migrations() -> None:
     """Establish connection and run migrations asynchronously."""
     # Override url with settings
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = settings.DATABASE_OWNER_URL
 
     connectable = async_engine_from_config(
         configuration,

@@ -31,14 +31,12 @@ def upgrade() -> None:
             CREATE POLICY tenant_isolation_policy ON {table}
             AS PERMISSIVE
             FOR ALL
-            TO public
+            TO contexthub_app
             USING (
-                current_setting('app.bypass_rls', true) = 'true'
-                OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
+                tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
             )
             WITH CHECK (
-                current_setting('app.bypass_rls', true) = 'true'
-                OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
+                tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
             );
         """)
 

@@ -8,7 +8,7 @@ from app.core.context import (
     current_context,
     try_current_context,
 )
-from app.core.database import async_session
+from app.core.database import app_session, owner_session
 from app.core.uow import UnitOfWork
 
 # 1. Security & Identity Context Extraction
@@ -49,7 +49,7 @@ async def get_uow(
 ) -> AsyncIterator[UnitOfWork]:
     """Provide a tenant-scoped Unit of Work transaction."""
     async with UnitOfWork(
-        session_factory=async_session,
+        session_factory=app_session,
         context=context,
         is_admin=False,
     ) as uow:
@@ -59,7 +59,7 @@ async def get_uow(
 async def get_public_uow() -> AsyncIterator[UnitOfWork]:
     """Provide an RLS-bypassed Unit of Work preserving request logging context."""
     async with UnitOfWork(
-        session_factory=async_session,
+        session_factory=owner_session,
         context=current_context(),
         is_admin=True,
     ) as uow:

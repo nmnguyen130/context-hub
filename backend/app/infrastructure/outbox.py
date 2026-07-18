@@ -38,11 +38,6 @@ async def process_outbox_event(
     """Claims and sends a single outbox event."""
     async with session_factory() as session:
         async with session.begin():
-            # Outbox is global, bypass tenant RLS.
-            await session.execute(
-                text("SELECT set_config('app.bypass_rls', 'true', true)")
-            )
-
             stmt = (
                 select(OutboxEvent)
                 .where(
@@ -99,9 +94,6 @@ async def run_outbox_relay(
     while True:
         try:
             async with session_factory() as session:
-                await session.execute(
-                    text("SELECT set_config('app.bypass_rls', 'true', true)")
-                )
                 now = datetime.now(UTC)
 
                 stmt = (

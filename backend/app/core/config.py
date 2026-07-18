@@ -12,13 +12,22 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
+    POSTGRES_OWNER_USER: str = "postgres"
+    POSTGRES_OWNER_PASSWORD: str
+
+    POSTGRES_APP_USER: str = "contexthub_app"
+    POSTGRES_APP_PASSWORD: str
+
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str
     POSTGRES_DB: str = "contexthub"
 
     DATABASE_URL: str | None = None
+    DATABASE_OWNER_URL: str | None = None
+
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_OWNER_POOL_SIZE: int = 2
 
     # Redis / Worker
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -65,7 +74,12 @@ class Settings(BaseSettings):
     def validate_settings(self):
         if self.DATABASE_URL is None:
             self.DATABASE_URL = (
-                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"postgresql+asyncpg://{self.POSTGRES_APP_USER}:{self.POSTGRES_APP_PASSWORD}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+        if self.DATABASE_OWNER_URL is None:
+            self.DATABASE_OWNER_URL = (
+                f"postgresql+asyncpg://{self.POSTGRES_OWNER_USER}:{self.POSTGRES_OWNER_PASSWORD}"
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
 

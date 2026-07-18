@@ -8,7 +8,7 @@ x-python-service: &python-service
   env_file: .env
   environment:
     POSTGRES_HOST: db
-    REDIS_HOST: redis
+    REDIS_URL: redis://redis:6379/0
     PYTHONPATH: /app
   restart: unless-stopped
 
@@ -20,8 +20,13 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    environment:
+      POSTGRES_USER: ${POSTGRES_OWNER_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contexthub}"]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contexthub}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -35,7 +40,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5

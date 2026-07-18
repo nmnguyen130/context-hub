@@ -7,19 +7,34 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from app.core.config import settings
 
 
-def create_engine_from_settings(url: str | None = None):
-    return create_async_engine(
-        url or settings.DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-    )
+# App Engine — contexthub_app role, RLS enforced
+app_engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+)
 
+app_session = async_sessionmaker(
+    bind=app_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
 
-engine = create_engine_from_settings()
+# Owner Engine — postgres role, DDL and migrations (bypasses RLS naturally)
+owner_engine = create_async_engine(
+    settings.DATABASE_OWNER_URL,
+    pool_pre_ping=True,
+    pool_size=settings.DATABASE_OWNER_POOL_SIZE,
+    max_overflow=0,
+)
 
-async_session = async_sessionmaker(
-    bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+owner_session = async_sessionmaker(
+    bind=owner_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
 )
 
 
@@ -43,5 +58,5 @@ class TenantBaseModel(Base):
 
 async def get_session():
     """FastAPI dependency yielding a raw database session lifecycle."""
-    async with async_session() as session:
+    async with app_session() as session:
         yield session
