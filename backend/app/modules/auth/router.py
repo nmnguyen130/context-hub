@@ -8,18 +8,17 @@ from app.api.dependencies import (
     require_roles,
 )
 from app.core.context import RequestContext, UserRole
+from app.core.pagination import PaginatedResponse, PaginationParams
 from app.modules.auth.models import InvitationStatus
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
     InvitationAccept,
     InvitationCreate,
-    InvitationListResponse,
     InvitationResponse,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
-    UserListResponse,
     UserResponse,
     UserUpdate,
 )
@@ -141,19 +140,18 @@ async def change_password(
     await user_service.uow.commit()
 
 
-@auth_router.get("/users", response_model=UserListResponse)
+@auth_router.get("/users", response_model=PaginatedResponse[UserResponse])
 async def list_users(
-    skip: int = 0,
-    limit: int = 50,
+    pagination: PaginationParams = Depends(),
     is_active: bool | None = None,
     context: RequestContext = Depends(get_authenticated_context),
     user_service: UserService = Depends(get_service(UserService)),
 ):
     """Lists all users belonging to the current tenant organization."""
     users, total = await user_service.list_users(
-        tenant_id=context.tenant_id, skip=skip, limit=limit, is_active=is_active
+        tenant_id=context.tenant_id, pagination=pagination, is_active=is_active
     )
-    return UserListResponse(items=users, total=total)
+    return PaginatedResponse[UserResponse].create(items=users, total=total, pagination=pagination)
 
 
 @auth_router.patch("/users/{user_id}/role", response_model=UserResponse)
@@ -229,19 +227,18 @@ async def create_invitation(
     return invitation
 
 
-@auth_router.get("/invitations", response_model=InvitationListResponse)
+@auth_router.get("/invitations", response_model=PaginatedResponse[InvitationResponse])
 async def list_invitations(
-    skip: int = 0,
-    limit: int = 50,
+    pagination: PaginationParams = Depends(),
     status: InvitationStatus | None = None,
     context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
     """Lists all invitations sent from this tenant. Admin only."""
     items, total = await invite_service.list_invitations(
-        tenant_id=context.tenant_id, status=status, skip=skip, limit=limit
+        tenant_id=context.tenant_id, status=status, pagination=pagination
     )
-    return InvitationListResponse(items=items, total=total)
+    return PaginatedResponse[InvitationResponse].create(items=items, total=total, pagination=pagination)
 
 
 @auth_router.post(

@@ -4,6 +4,7 @@ import uuid
 from sqlalchemy import func, select
 
 from app.core.exceptions import ServiceError
+from app.core.pagination import PaginationParams
 from app.core.uow import UnitOfWork
 from app.modules.tenant.models import Tenant
 from app.modules.tenant.schemas import TenantCreate, TenantUpdate
@@ -30,8 +31,7 @@ class TenantService:
 
     async def list(
         self,
-        limit: int = 10,
-        offset: int = 0,
+        pagination: PaginationParams = PaginationParams(),
         search: str | None = None,
         order_by: str = "created_at",
     ) -> tuple[list[Tenant], int]:
@@ -50,7 +50,12 @@ class TenantService:
             "created_at": Tenant.created_at,
             "plan_tier": Tenant.plan_tier,
         }
-        sort_col = order_columns.get(order_by.lower().strip(), Tenant.created_at)
+        
+        normalized_order = order_by.lower().strip()
+        if normalized_order not in order_columns:
+            raise ServiceError(f"Invalid sort column: {order_by}", status_code=422)
+            
+        sort_col = order_columns[normalized_order]
         stmt = stmt.order_by(sort_col)
 
         # Count total matching records before applying pagination
@@ -58,7 +63,7 @@ class TenantService:
         total = await self.uow.session.scalar(count_stmt) or 0
 
         # Retrieve the paginated items
-        paginated_stmt = stmt.limit(limit).offset(offset)
+        paginated_stmt = stmt.offset(pagination.offset).limit(pagination.limit)
         items = (await self.uow.session.scalars(paginated_stmt)).all()
 
         return list(items), total

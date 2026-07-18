@@ -44,11 +44,6 @@ class TenantResponse(BaseModel):
     updated_at: datetime
 
 
-class TenantListResponse(BaseModel):
-    items: list[TenantResponse]
-    total: int
-
-
 class TenantStatsResponse(BaseModel):
     user_count: int
     document_count: int

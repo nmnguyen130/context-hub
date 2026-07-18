@@ -53,11 +53,6 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-class UserListResponse(BaseModel):
-    items: list[UserResponse]
-    total: int
-
-
 class InvitationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,11 +62,6 @@ class InvitationResponse(BaseModel):
     status: InvitationStatus
     expires_at: datetime
     created_at: datetime
-
-
-class InvitationListResponse(BaseModel):
-    items: list[InvitationResponse]
-    total: int
 
 
 class TokenResponse(BaseModel):

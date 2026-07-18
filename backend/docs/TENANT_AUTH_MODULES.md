@@ -179,8 +179,8 @@ sequenceDiagram
 
 * **`GET /tenants`**
   * **Auth / Scope**: Authenticated (`SUPER_ADMIN` only)
-  * **Query Params**: `limit` (int), `offset` (int), `search` (str), `order_by` (str)
-  * **Response**: `TenantListResponse`
+  * **Query Params**: `offset` (int), `limit` (int), `search` (str), `order_by` (str)
+  * **Response**: `PaginatedResponse[TenantResponse]`
   * **Description**: Paginated list of all tenant entities. Used for global system dashboards.
 
 * **`GET /tenants/lookup/{slug}`**
@@ -191,7 +191,7 @@ sequenceDiagram
 * **`DELETE /tenants/{tenant_id}`**
   * **Auth / Scope**: Authenticated (`SUPER_ADMIN` only, RLS Bypassed)
   * **Response**: N/A (Status `204 No Content`)
-  * **Description**: Soft-deletes a tenant (`is_active = False`).
+  * **Description**: Soft-deletes a tenant (`is_active = False`). Returns `204 No Content` to signal success without disclosing the soft-deleted state details.
 
 ---
 
@@ -252,8 +252,8 @@ sequenceDiagram
 
 * **`GET /auth/users`**
   * **Auth / Scope**: Authenticated (Organization scope)
-  * **Query Params**: `skip` (int), `limit` (int), `is_active` (bool)
-  * **Response**: `UserListResponse`
+  * **Query Params**: `offset` (int), `limit` (int), `is_active` (bool)
+  * **Response**: `PaginatedResponse[UserResponse]`
   * **Description**: Lists users in the organization with pagination.
 
 * **`PATCH /auth/users/{user_id}/role`**
@@ -283,7 +283,7 @@ sequenceDiagram
 
 * **`GET /auth/invitations`**
   * **Auth / Scope**: Admin / Owner
-  * **Response**: `InvitationListResponse`
+  * **Response**: `PaginatedResponse[InvitationResponse]`
   * **Description**: Lists all active and accepted invitations issued by the tenant organization.
 
 * **`POST /auth/invitations/{invitation_id}/revoke`**

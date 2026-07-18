@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.context import UserRole
 from app.core.exceptions import ServiceError
+from app.core.pagination import PaginationParams
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import Invitation, InvitationStatus, User
 from app.modules.auth.schemas import InvitationCreate
@@ -101,8 +102,7 @@ class InvitationService:
         self,
         tenant_id: UUID,
         status: InvitationStatus | None = None,
-        skip: int = 0,
-        limit: int = 50,
+        pagination: PaginationParams = PaginationParams(),
     ) -> tuple[list[Invitation], int]:
         """List invitations for a tenant, optionally filtered by status, with pagination."""
         stmt = select(Invitation).where(Invitation.tenant_id == tenant_id)
@@ -112,7 +112,7 @@ class InvitationService:
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = await self.uow.session.scalar(count_stmt) or 0
 
-        paginated = stmt.offset(skip).limit(limit)
+        paginated = stmt.offset(pagination.offset).limit(pagination.limit)
         result = await self.uow.session.scalars(paginated)
         return list(result.all()), total
 

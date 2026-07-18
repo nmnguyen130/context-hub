@@ -8,8 +8,8 @@ from app.api.dependencies import (
     require_roles,
 )
 from app.core.context import RequestContext, UserRole
+from app.core.pagination import PaginatedResponse, PaginationParams
 from app.modules.tenant.schemas import (
-    TenantListResponse,
     TenantResponse,
     TenantStatsResponse,
     TenantUpdate,
@@ -53,21 +53,20 @@ async def get_tenant_stats(
 
 @tenants_router.get(
     "",
-    response_model=TenantListResponse,
+    response_model=PaginatedResponse[TenantResponse],
     dependencies=[Depends(require_roles(UserRole.SUPER_ADMIN))],
 )
 async def list_tenants(
-    limit: int = 10,
-    offset: int = 0,
+    pagination: PaginationParams = Depends(),
     search: str | None = None,
     order_by: str = "created_at",
     tenant_service: TenantService = Depends(get_service(TenantService, public=True)),
 ):
     """Lists all system tenants."""
     items, total = await tenant_service.list(
-        limit=limit, offset=offset, search=search, order_by=order_by
+        pagination=pagination, search=search, order_by=order_by
     )
-    return TenantListResponse(items=items, total=total)
+    return PaginatedResponse[TenantResponse].create(items=items, total=total, pagination=pagination)
 
 
 @tenants_router.get("/lookup/{slug}")

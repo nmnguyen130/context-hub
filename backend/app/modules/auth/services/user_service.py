@@ -5,6 +5,7 @@ from sqlalchemy import func, select, update
 
 from app.core.context import UserRole
 from app.core.exceptions import ServiceError
+from app.core.pagination import PaginationParams
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import RefreshToken, User
 from app.modules.auth.schemas import ChangePasswordRequest, UserUpdate
@@ -39,8 +40,7 @@ class UserService:
     async def list_users(
         self,
         tenant_id: UUID,
-        skip: int = 0,
-        limit: int = 50,
+        pagination: PaginationParams = PaginationParams(),
         is_active: bool | None = None,
     ) -> tuple[list[User], int]:
         """List users belonging to a tenant organization with pagination."""
@@ -51,7 +51,7 @@ class UserService:
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = await self.uow.session.scalar(count_stmt) or 0
 
-        paginated = stmt.offset(skip).limit(limit)
+        paginated = stmt.offset(pagination.offset).limit(pagination.limit)
         items = (await self.uow.session.scalars(paginated)).all()
         return list(items), total
 
