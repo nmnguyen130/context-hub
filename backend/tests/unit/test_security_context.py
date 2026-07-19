@@ -1,4 +1,5 @@
 import uuid
+
 import jwt
 import pytest
 
@@ -33,7 +34,7 @@ def test_bcrypt_password_hashing():
 def test_jwt_access_and_refresh_tokens():
     user_id = uuid.uuid4()
     tenant_id = uuid.uuid4()
-    
+
     # Test Access Token
     access_tok = create_access_token(user_id, tenant_id, UserRole.ADMIN, plan="pro")
     payload = decode_token(access_tok, expected_type="access")
@@ -41,7 +42,7 @@ def test_jwt_access_and_refresh_tokens():
     assert payload["tenant_id"] == str(tenant_id)
     assert payload["role"] == UserRole.ADMIN.value
     assert payload["plan"] == "pro"
-    
+
     # Test Refresh Token
     refresh_tok, jti, expires = create_refresh_token(user_id, tenant_id)
     payload_refresh = decode_token(refresh_tok, expected_type="refresh")
@@ -55,7 +56,7 @@ def test_jwt_decode_type_validation():
     user_id = uuid.uuid4()
     tenant_id = uuid.uuid4()
     access_tok = create_access_token(user_id, tenant_id, UserRole.MEMBER)
-    
+
     with pytest.raises(ValueError, match="Expected token type"):
         decode_token(access_tok, expected_type="refresh")
 
@@ -69,12 +70,12 @@ def test_request_context_propagation():
         user_id=uuid.uuid4(),
         role=UserRole.MEMBER,
     )
-    
+
     # Before binding
     assert try_current_context() is None
     with pytest.raises(RuntimeError):
         current_context()
-        
+
     # With binding
     with bind_context(ctx):
         current = current_context()
@@ -83,6 +84,6 @@ def test_request_context_propagation():
         assert current.tenant_id == ctx.tenant_id
         assert current.user_id == ctx.user_id
         assert current.role == UserRole.MEMBER
-        
+
     # After binding exits
     assert try_current_context() is None

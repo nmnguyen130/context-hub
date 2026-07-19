@@ -6,7 +6,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.core.config import settings
 
-
 # App Engine — contexthub_app role, RLS enforced
 app_engine = create_async_engine(
     settings.DATABASE_URL,

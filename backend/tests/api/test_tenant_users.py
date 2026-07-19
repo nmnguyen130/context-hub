@@ -1,4 +1,5 @@
 import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -85,8 +86,12 @@ async def test_api_tenant_isolation_list(async_client: AsyncClient, db_session):
     db_session.add(tenant_b)
     await db_session.commit()
 
-    user_a = make_user(tenant_id=tenant_a.id, email="usera@tenant-a.com", role=UserRole.ADMIN)
-    user_b = make_user(tenant_id=tenant_b.id, email="userb@tenant-b.com", role=UserRole.ADMIN)
+    user_a = make_user(
+        tenant_id=tenant_a.id, email="usera@tenant-a.com", role=UserRole.ADMIN
+    )
+    user_b = make_user(
+        tenant_id=tenant_b.id, email="userb@tenant-b.com", role=UserRole.ADMIN
+    )
     db_session.add(user_a)
     db_session.add(user_b)
     await db_session.commit()
@@ -95,7 +100,7 @@ async def test_api_tenant_isolation_list(async_client: AsyncClient, db_session):
     response = await async_client.get("/api/v1/auth/users", headers=headers)
     assert response.status_code == 200
     data = response.json()
-    
+
     # Tenant A should only see their own user
     assert data["total"] == 1
     emails = [item["email"] for item in data["items"]]
@@ -112,8 +117,12 @@ async def test_api_tenant_isolation_update(async_client: AsyncClient, db_session
     db_session.add(tenant_b)
     await db_session.commit()
 
-    user_a = make_user(tenant_id=tenant_a.id, email="admina@tenant-a.com", role=UserRole.ADMIN)
-    user_b_member = make_user(tenant_id=tenant_b.id, email="memberb@tenant-b.com", role=UserRole.MEMBER)
+    user_a = make_user(
+        tenant_id=tenant_a.id, email="admina@tenant-a.com", role=UserRole.ADMIN
+    )
+    user_b_member = make_user(
+        tenant_id=tenant_b.id, email="memberb@tenant-b.com", role=UserRole.MEMBER
+    )
     db_session.add(user_a)
     db_session.add(user_b_member)
     await db_session.commit()
@@ -121,10 +130,10 @@ async def test_api_tenant_isolation_update(async_client: AsyncClient, db_session
     # Tenant A attempts to update role of Tenant B's member
     headers = get_headers(user_a.id, tenant_a.id, UserRole.ADMIN)
     payload = {"role": "ADMIN"}
-    
+
     response = await async_client.patch(
         f"/api/v1/auth/users/{user_b_member.id}/role", json=payload, headers=headers
     )
-    
+
     # Should be 404 because RLS makes user_b invisible to Tenant A's connection
     assert response.status_code == 404

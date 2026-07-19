@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.api.middleware import RequestContextMiddleware
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import app_engine, owner_engine, app_session
+from app.core.database import app_engine, app_session, owner_engine
 from app.core.exceptions import register_exception_handlers
 from app.infrastructure.rate_limiter import LUA_SLIDING_WINDOW
 from app.infrastructure.storage import S3StorageProvider

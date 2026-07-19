@@ -59,9 +59,18 @@ class Settings(BaseSettings):
 
     # RAG
     RAG_EMBEDDING_MODEL: str = "gemini-embedding-001"
+    RAG_EMBEDDING_DIMENSION: int = 768
     RAG_CHAT_MODEL: str = "gemini-2.0-flash"
     RAG_FINAL_TOP_K: int = 5
     RAG_RELEVANCE_THRESHOLD: float = 0.05
+    RAG_RRF_K: int = 60
+    RAG_CHUNK_SIZE: int = 800
+    RAG_CHUNK_OVERLAP: int = 100
+    RAG_MEMORY_WINDOW: int = 6
+    RAG_SESSION_CACHE_TTL: int = 300
+    RAG_SEMANTIC_CACHE_TTL: int = 3600
+    RAG_HYDE_CHUNK_THRESHOLD: int = 500
+    RAG_ALLOWED_EXTENSIONS: str = ".pdf,.docx,.md,.txt,.csv,.json"
 
     # Cache
     ENABLE_SEMANTIC_CACHE: bool = True

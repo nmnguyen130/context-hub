@@ -43,15 +43,23 @@ async def test_engines():
         await conn.execute(text("CREATE SCHEMA public;"))
         await conn.execute(text("GRANT ALL ON SCHEMA public TO public;"))
         # Re-apply the default privileges inside the newly created schema
-        await conn.execute(text(f"ALTER DEFAULT PRIVILEGES FOR ROLE {settings.POSTGRES_OWNER_USER} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {settings.POSTGRES_APP_USER};"))
-        await conn.execute(text(f"ALTER DEFAULT PRIVILEGES FOR ROLE {settings.POSTGRES_OWNER_USER} IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {settings.POSTGRES_APP_USER};"))
+        await conn.execute(
+            text(
+                f"ALTER DEFAULT PRIVILEGES FOR ROLE {settings.POSTGRES_OWNER_USER} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {settings.POSTGRES_APP_USER};"
+            )
+        )
+        await conn.execute(
+            text(
+                f"ALTER DEFAULT PRIVILEGES FOR ROLE {settings.POSTGRES_OWNER_USER} IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {settings.POSTGRES_APP_USER};"
+            )
+        )
 
     # 5. Run migrations on the test database using the admin/owner role
     env = {**os.environ, "DATABASE_OWNER_URL": test_owner_url}
     subprocess.run(["alembic", "upgrade", "head"], env=env, check=True)
-    
+
     yield app_engine, owner_engine
-    
+
     await app_engine.dispose()
     await owner_engine.dispose()
 
@@ -66,6 +74,7 @@ async def clean_database(test_engines):
 
 
 from sqlalchemy import event
+
 
 @pytest_asyncio.fixture
 async def db_session(test_engines) -> AsyncGenerator[AsyncSession, None]:
@@ -101,7 +110,11 @@ def make_tenant_uow(test_engines):
     app_engine, owner_engine = test_engines
     session_factory = async_sessionmaker(bind=app_engine, expire_on_commit=False)
 
-    def _make(tenant_id: uuid.UUID, user_id: uuid.UUID | None = None, role: UserRole = UserRole.MEMBER):
+    def _make(
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        role: UserRole = UserRole.MEMBER,
+    ):
         ctx = RequestContext(
             request_id="test-req",
             trace_id="test-trace",
@@ -119,7 +132,9 @@ async def async_client(test_engines) -> AsyncGenerator[AsyncClient, None]:
     """Provides an AsyncClient with overridden dependencies for DB access."""
     app_engine, owner_engine = test_engines
     app_session_factory = async_sessionmaker(bind=app_engine, expire_on_commit=False)
-    owner_session_factory = async_sessionmaker(bind=owner_engine, expire_on_commit=False)
+    owner_session_factory = async_sessionmaker(
+        bind=owner_engine, expire_on_commit=False
+    )
 
     async def override_get_uow(
         context: RequestContext = Depends(get_authenticated_context),

@@ -1,13 +1,14 @@
 import uuid
+
 import pytest
 
 from app.core.context import UserRole
 from app.core.exceptions import ServiceError
 from app.modules.auth.models import InvitationStatus
 from app.modules.auth.schemas import InvitationCreate, UserUpdate
-from app.modules.auth.services.user_service import UserService
 from app.modules.auth.services.invitation_service import InvitationService
-from tests.factories import make_tenant, make_user, make_invitation
+from app.modules.auth.services.user_service import UserService
+from tests.factories import make_invitation, make_tenant, make_user
 
 
 @pytest.mark.integration
@@ -24,7 +25,7 @@ async def test_user_service_cannot_demote_last_admin(uow, make_tenant_uow):
     async with make_tenant_uow(tenant.id) as tenant_uow:
         service = UserService(tenant_uow)
         data = UserUpdate(role=UserRole.MEMBER)
-        
+
         # Demoting the last active administrator must trigger a 400 Bad Request
         with pytest.raises(ServiceError) as exc_info:
             await service.update_role(
@@ -49,7 +50,7 @@ async def test_user_service_cannot_deactivate_self(uow, make_tenant_uow):
     # Access as Tenant A
     async with make_tenant_uow(tenant.id) as tenant_uow:
         service = UserService(tenant_uow)
-        
+
         # Activating user cannot deactivate self
         with pytest.raises(ServiceError) as exc_info:
             await service.deactivate(
@@ -74,7 +75,7 @@ async def test_invitation_service_flow(uow, make_tenant_uow):
     async with make_tenant_uow(tenant.id) as tenant_uow:
         service = InvitationService(tenant_uow)
         data = InvitationCreate(email="invite@test.com")
-        
+
         invite, token = await service.create_invitation(
             tenant_id=tenant.id,
             invited_by=user.id,
