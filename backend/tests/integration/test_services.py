@@ -86,7 +86,7 @@ async def test_invitation_service_flow(uow, make_tenant_uow):
         assert token is not None
 
         # Verify listing works
-        items, total = await service.list_invitations()
+        items, total = await service.list_invitations(tenant_id=tenant.id)
         assert total == 1
         assert items[0].email == "invite@test.com"
 

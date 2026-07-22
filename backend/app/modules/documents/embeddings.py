@@ -1,7 +1,3 @@
-"""Batch embedding and normalizer module."""
-
-from __future__ import annotations
-
 import asyncio
 import logging
 import math
@@ -9,7 +5,7 @@ import random
 
 from app.core.clients import GeminiClient
 from app.core.config import settings
-from app.core.exceptions import EmbeddingError
+from app.modules.documents.exceptions import EmbeddingError
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +14,7 @@ MAX_RETRIES = 3
 
 
 def l2_normalize(vector: list[float]) -> list[float]:
+    """Normalize a vector to unit length using L2 norm."""
     norm = math.sqrt(sum(v * v for v in vector))
     if norm == 0:
         return vector
@@ -25,6 +22,7 @@ def l2_normalize(vector: list[float]) -> list[float]:
 
 
 def validate_dimension(vector: list[float]) -> list[float]:
+    """Validate the embedding dimension and apply L2 normalization."""
     expected = settings.RAG_EMBEDDING_DIMENSION
     if len(vector) != expected:
         raise EmbeddingError(
@@ -58,7 +56,10 @@ class EmbeddingProvider:
         vectors = await self.embed_texts([query])
         return vectors[0]
 
-    async def _embed_batch_with_retry(self, batch: list[str], batch_idx: int) -> list[list[float]]:
+    async def _embed_batch_with_retry(
+        self, batch: list[str], batch_idx: int
+    ) -> list[list[float]]:
+        """Embed a single batch of text strings with exponential backoff retry."""
         last_error: Exception | None = None
         for attempt in range(MAX_RETRIES):
             try:

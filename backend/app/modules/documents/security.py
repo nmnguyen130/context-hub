@@ -1,16 +1,9 @@
-"""DLP scanning and masking module with workspace rule support."""
-
-from __future__ import annotations
-
 import hashlib
-import logging
 import re
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.core.exceptions import DLPViolation
-
-logger = logging.getLogger(__name__)
+from app.modules.documents.exceptions import DLPViolation
 
 
 @dataclass(frozen=True)
@@ -69,6 +62,7 @@ class DLPScanner:
         self.patterns = patterns or DEFAULT_PATTERNS
 
     def scan(self, text: str) -> list[DLPMatch]:
+        """Scan text for all configured DLP patterns and return matching locations."""
         matches: list[DLPMatch] = []
         for pattern in self.patterns:
             for match in pattern.pattern.finditer(text):
@@ -89,7 +83,7 @@ _DEFAULT_SCANNER = DLPScanner()
 
 
 def mask_pii(text: str, matches: list[DLPMatch]) -> tuple[str, dict[str, str]]:
-    """Replace PII with deterministic reversible tokens."""
+    """Replace PII matches with deterministic, reversible tokens."""
     if not matches:
         return text, {}
 
@@ -113,11 +107,7 @@ def apply_dlp(
     text: str,
     workspace_dlp_rules: dict | None = None,
 ) -> tuple[str, list[str], dict[str, str]]:
-    """Scan text and apply configured DLP action.
-    
-    Returns:
-        tuple[str, list[str], dict[str, str]]: (safe_text, warnings, vault)
-    """
+    """Scan text and apply configured DLP actions like mask, reject, or log."""
     rules = workspace_dlp_rules or {}
     action = (rules.get("action") or settings.RAG_DLP_ACTION).upper()
     if action == "DISABLED":

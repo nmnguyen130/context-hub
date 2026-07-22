@@ -1,7 +1,3 @@
-"""Plain text and log file parser."""
-
-from __future__ import annotations
-
 import unicodedata
 
 from app.modules.documents.parsers.base import BaseParser, ParsedBlock, ParseResult
@@ -9,6 +5,7 @@ from app.modules.documents.parsers.base import BaseParser, ParsedBlock, ParseRes
 
 class PlaintextParser(BaseParser):
     def parse(self, data: bytes, filename: str) -> ParseResult:
+        """Parse plain text raw bytes into structured lines of prose."""
         text = data.decode("utf-8", errors="replace")
         text = unicodedata.normalize("NFC", text)
         text = "\n".join(line.rstrip() for line in text.splitlines())

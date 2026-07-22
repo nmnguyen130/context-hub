@@ -1,9 +1,7 @@
-"""Chunker base types."""
-
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
+from app.modules.documents.parsers.base import ParsedBlock
 
 
 @dataclass
@@ -14,7 +12,7 @@ class ChunkMetadata:
     char_end: int = 0
     content_type: str = "prose"
     language: str | None = None
-    chunker_used: str = "sliding_window"
+    chunker_used: str = ""
     extra: dict = field(default_factory=dict)
 
 
@@ -28,9 +26,13 @@ class ChunkResult:
 
 class BaseChunker(ABC):
     @abstractmethod
-    def chunk(self, text: str, blocks: list | None = None) -> list[ChunkResult]:
+    def chunk(
+        self, text: str, blocks: list[ParsedBlock] | None = None
+    ) -> list[ChunkResult]:
+        """Partition text into a list of chunk results."""
         raise NotImplementedError
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
+        """Provide a fast, rough token count estimate for the text."""
         return max(1, len(text.split()))

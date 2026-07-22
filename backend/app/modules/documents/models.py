@@ -1,7 +1,3 @@
-"""SQLAlchemy models for document ingestion and indexing."""
-
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from enum import StrEnum
@@ -54,7 +50,7 @@ class Workspace(TenantBaseModel, DomainEventsMixin):
         onupdate=func.now(),
     )
 
-    documents: Mapped[list[Document]] = relationship(back_populates="workspace")
+    documents: Mapped[list["Document"]] = relationship(back_populates="workspace")
 
 
 class Document(TenantBaseModel, DomainEventsMixin):
@@ -97,7 +93,7 @@ class Document(TenantBaseModel, DomainEventsMixin):
     )
 
     workspace: Mapped[Workspace] = relationship(back_populates="documents")
-    chunks: Mapped[list[DocumentChunk]] = relationship(back_populates="document")
+    chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document")
 
 
 class DocumentChunk(TenantBaseModel):

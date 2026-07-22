@@ -1,7 +1,3 @@
-"""Document and workspace application services."""
-
-from __future__ import annotations
-
 import hashlib
 import io
 import re
@@ -14,6 +10,7 @@ from app.core.context import RequestContext, try_current_context
 from app.core.exceptions import ServiceError
 from app.core.pagination import PaginationParams
 from app.core.uow import UnitOfWork
+from app.infrastructure.storage import StorageProvider
 from app.modules.documents.models import Document, DocumentStatus, Workspace
 from app.modules.documents.parsers import EXTENSION_MIME, detect_mime_type
 from app.modules.documents.schemas import WorkspaceCreate, WorkspaceUpdate
@@ -24,16 +21,23 @@ class WorkspaceService:
         self.uow = uow
 
     async def create(self, data: WorkspaceCreate) -> Workspace:
+        """Create a new workspace for the tenant, generating a slug if not provided."""
         slug = data.slug or self._generate_slug(data.name)
+        ctx = try_current_context()
+        if not ctx or not ctx.tenant_id:
+            raise ServiceError("Tenant context required", status_code=400)
+
         existing = await self.uow.session.scalar(
-            select(Workspace).where(Workspace.slug == slug)
+            select(Workspace).where(
+                Workspace.tenant_id == ctx.tenant_id,
+                Workspace.slug == slug,
+            )
         )
         if existing:
             raise ServiceError("Workspace slug already exists.", status_code=409)
 
-        ctx = try_current_context()
         workspace = Workspace(
-            tenant_id=ctx.tenant_id if ctx else uuid.uuid4(),
+            tenant_id=ctx.tenant_id,
             name=data.name.strip(),
             slug=slug,
             description=data.description,
@@ -43,6 +47,7 @@ class WorkspaceService:
         return workspace
 
     async def get(self, workspace_id: uuid.UUID) -> Workspace:
+        """Retrieve a single workspace by ID."""
         workspace = await self.uow.session.get(Workspace, workspace_id)
         if workspace is None:
             raise ServiceError("Workspace not found.", status_code=404)
@@ -51,12 +56,25 @@ class WorkspaceService:
     async def list(
         self, pagination: PaginationParams = PaginationParams()
     ) -> tuple[list[Workspace], int]:
-        stmt = select(Workspace).where(Workspace.is_active.is_(True)).order_by(
-            Workspace.created_at.desc()
+        """List workspaces for the current tenant with pagination."""
+        ctx = try_current_context()
+        if not ctx or not ctx.tenant_id:
+            raise ServiceError("Tenant context required", status_code=400)
+
+        stmt = (
+            select(Workspace)
+            .where(
+                Workspace.tenant_id == ctx.tenant_id,
+                Workspace.is_active.is_(True),
+            )
+            .order_by(Workspace.created_at.desc())
         )
-        total = await self.uow.session.scalar(
-            select(func.count()).select_from(stmt.subquery())
-        ) or 0
+        total = (
+            await self.uow.session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
         items = (
             await self.uow.session.scalars(
                 stmt.offset(pagination.offset).limit(pagination.limit)
@@ -65,6 +83,7 @@ class WorkspaceService:
         return list(items), total
 
     async def update(self, workspace_id: uuid.UUID, data: WorkspaceUpdate) -> Workspace:
+        """Update workspace fields."""
         workspace = await self.get(workspace_id)
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(workspace, key, value)
@@ -73,6 +92,7 @@ class WorkspaceService:
 
     @staticmethod
     def _generate_slug(name: str) -> str:
+        """Generate a URL-safe slug from a workspace name."""
         slug = re.sub(
             r"[\s_-]+",
             "-",
@@ -94,9 +114,10 @@ class DocumentService:
         filename: str,
         content: bytes,
         content_type: str | None,
-        storage,
+        storage: StorageProvider,
         context: RequestContext,
     ) -> Document:
+        """Validate and upload a document to object storage, then register it in the database."""
         await self._validate_file(filename, content)
 
         workspace = await self.uow.session.get(Workspace, workspace_id)
@@ -106,6 +127,7 @@ class DocumentService:
         content_hash = hashlib.sha256(content).hexdigest()
         duplicate = await self.uow.session.scalar(
             select(Document).where(
+                Document.tenant_id == context.tenant_id,
                 Document.workspace_id == workspace_id,
                 Document.content_hash == content_hash,
             )
@@ -147,6 +169,7 @@ class DocumentService:
         return document
 
     async def get(self, document_id: uuid.UUID) -> Document:
+        """Retrieve a single document by ID."""
         document = await self.uow.session.get(Document, document_id)
         if document is None:
             raise ServiceError("Document not found.", status_code=404)
@@ -157,14 +180,25 @@ class DocumentService:
         workspace_id: uuid.UUID,
         pagination: PaginationParams = PaginationParams(),
     ) -> tuple[list[Document], int]:
+        """List documents belonging to a workspace with pagination."""
+        ctx = try_current_context()
+        if not ctx or not ctx.tenant_id:
+            raise ServiceError("Tenant context required", status_code=400)
+
         stmt = (
             select(Document)
-            .where(Document.workspace_id == workspace_id)
+            .where(
+                Document.tenant_id == ctx.tenant_id,
+                Document.workspace_id == workspace_id,
+            )
             .order_by(Document.created_at.desc())
         )
-        total = await self.uow.session.scalar(
-            select(func.count()).select_from(stmt.subquery())
-        ) or 0
+        total = (
+            await self.uow.session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
         items = (
             await self.uow.session.scalars(
                 stmt.offset(pagination.offset).limit(pagination.limit)
@@ -172,7 +206,8 @@ class DocumentService:
         ).all()
         return list(items), total
 
-    async def delete(self, document_id: uuid.UUID, storage) -> None:
+    async def delete(self, document_id: uuid.UUID, storage: StorageProvider) -> None:
+        """Delete a document from object storage and the database."""
         document = await self.get(document_id)
         await storage.delete_file(document.storage_key)
         if document.extracted_text_key:
@@ -181,6 +216,7 @@ class DocumentService:
         await self.uow.flush()
 
     async def _validate_file(self, filename: str, content: bytes) -> None:
+        """Validate file size and extension restrictions."""
         max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
         if len(content) > max_bytes:
             raise ServiceError(

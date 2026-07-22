@@ -1,7 +1,3 @@
-"""Parser registry and auto-dispatch."""
-
-from __future__ import annotations
-
 import mimetypes
 
 from app.modules.documents.parsers.base import BaseParser, ParseResult
@@ -32,6 +28,7 @@ EXTENSION_MIME: dict[str, str] = {
 
 
 def detect_mime_type(filename: str, content_type: str | None) -> str:
+    """Detect the MIME type of a file based on its extension or provided content type."""
     if content_type and content_type != "application/octet-stream":
         return content_type
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -42,11 +39,15 @@ def detect_mime_type(filename: str, content_type: str | None) -> str:
 
 
 def get_parser(mime_type: str) -> BaseParser:
+    """Get the appropriate parser instance from the registry for the given MIME type."""
     parser_cls = PARSER_REGISTRY.get(mime_type, PlaintextParser)
     return parser_cls()
 
 
-def parse_document(data: bytes, filename: str, content_type: str | None = None) -> ParseResult:
+def parse_document(
+    data: bytes, filename: str, content_type: str | None = None
+) -> ParseResult:
+    """Auto-detect MIME type and parse raw document bytes into a ParseResult."""
     mime = detect_mime_type(filename, content_type)
     parser = get_parser(mime)
     return parser.parse(data, filename)

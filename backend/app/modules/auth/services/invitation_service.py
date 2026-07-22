@@ -58,7 +58,10 @@ class InvitationService:
 
         # 1. Assert user doesn't already exist in the organization
         existing_user = await self.uow.session.scalar(
-            select(User).where(User.email == data.email.strip().lower())
+            select(User).where(
+                User.tenant_id == tenant_id,
+                User.email == data.email.strip().lower(),
+            )
         )
         if existing_user:
             raise ServiceError(
@@ -68,6 +71,7 @@ class InvitationService:
         # 2. Assert no other active pending invitation exists
         pending = await self.uow.session.scalar(
             select(Invitation).where(
+                Invitation.tenant_id == tenant_id,
                 Invitation.email == data.email.strip().lower(),
                 Invitation.status == InvitationStatus.PENDING,
             )
@@ -103,11 +107,12 @@ class InvitationService:
 
     async def list_invitations(
         self,
+        tenant_id: UUID,
         status: InvitationStatus | None = None,
         pagination: PaginationParams = PaginationParams(),
     ) -> tuple[list[Invitation], int]:
         """List invitations for a tenant, optionally filtered by status, with pagination."""
-        stmt = select(Invitation)
+        stmt = select(Invitation).where(Invitation.tenant_id == tenant_id)
         if status:
             stmt = stmt.where(Invitation.status == status)
 

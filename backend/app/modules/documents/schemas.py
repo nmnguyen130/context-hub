@@ -1,7 +1,3 @@
-"""Pydantic schemas and DTOs for documents and workspaces."""
-
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +9,8 @@ from app.modules.documents.models import DocumentStatus
 
 @dataclass
 class ScoredChunk:
+    """Dataclass representing a text chunk with relevance scores."""
+
     id: uuid.UUID
     document_id: uuid.UUID
     content: str

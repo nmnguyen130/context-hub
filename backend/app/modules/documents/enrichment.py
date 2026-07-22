@@ -1,17 +1,10 @@
-"""Metadata enrichment for document chunks."""
-
-from __future__ import annotations
-
 import re
 from collections import Counter
 
 from app.modules.documents.chunkers.base import ChunkResult
 
-
-def extract_topic_tags(text: str, top_n: int = 5) -> list[str]:
-    """Extract top frequent words as topic tags, skipping stopwords."""
-    words = re.findall(r"[a-zA-Z]{4,}", text.lower())
-    stopwords = {
+STOPWORDS = frozenset(
+    {
         "that",
         "this",
         "with",
@@ -48,7 +41,13 @@ def extract_topic_tags(text: str, top_n: int = 5) -> list[str]:
         "what",
         "each",
     }
-    filtered = [w for w in words if w not in stopwords]
+)
+
+
+def extract_topic_tags(text: str, top_n: int = 5) -> list[str]:
+    """Extract top frequent words as topic tags, skipping stopwords."""
+    words = re.findall(r"[a-zA-Z]{4,}", text.lower())
+    filtered = [w for w in words if w not in STOPWORDS]
     counts = Counter(filtered)
     return [word for word, _ in counts.most_common(top_n)]
 

@@ -1,7 +1,3 @@
-"""Parser base types and registry."""
-
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -25,4 +21,5 @@ class ParseResult:
 class BaseParser(ABC):
     @abstractmethod
     def parse(self, data: bytes, filename: str) -> ParseResult:
+        """Parse raw file bytes into structured blocks and plain text."""
         raise NotImplementedError

@@ -1,7 +1,4 @@
-"""Async HTTP clients for AI provider APIs."""
-
-from __future__ import annotations
-
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -17,7 +14,7 @@ COHERE_BASE = "https://api.cohere.com/v2"
 
 
 class GeminiClient:
-    """Thin async wrapper for Gemini embedding and generation APIs."""
+    """Client wrapper for Gemini AI embedding and generation APIs."""
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -29,6 +26,7 @@ class GeminiClient:
         texts: list[str],
         model: str | None = None,
     ) -> list[list[float]]:
+        """Generate embeddings for a list of texts using the Gemini API."""
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is required for embeddings")
 
@@ -41,7 +39,10 @@ class GeminiClient:
                 params={"key": self.api_key},
                 json={
                     "requests": [
-                        {"model": f"models/{model}", "content": {"parts": [{"text": t}]}}
+                        {
+                            "model": f"models/{model}",
+                            "content": {"parts": [{"text": t}]},
+                        }
                         for t in texts
                     ]
                 },
@@ -60,6 +61,7 @@ class GeminiClient:
         temperature: float = 0.2,
         max_output_tokens: int = 4096,
     ) -> str:
+        """Generate text content from a prompt using the Gemini API."""
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is required for generation")
 
@@ -98,6 +100,7 @@ class GeminiClient:
         temperature: float = 0.2,
         max_output_tokens: int = 4096,
     ) -> AsyncIterator[str]:
+        """Stream text generation chunks from a prompt using the Gemini API."""
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is required for generation")
 
@@ -130,11 +133,12 @@ class GeminiClient:
                     payload = line[6:]
                     if payload == "[DONE]":
                         break
-                    import json
 
                     chunk = json.loads(payload)
-                    parts = chunk.get("candidates", [{}])[0].get("content", {}).get(
-                        "parts", []
+                    parts = (
+                        chunk.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [])
                     )
                     for part in parts:
                         text = part.get("text")
@@ -143,7 +147,7 @@ class GeminiClient:
 
 
 class CohereClient:
-    """Thin async wrapper for Cohere Rerank API."""
+    """Client wrapper for the Cohere Rerank API."""
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or settings.COHERE_API_KEY
@@ -156,6 +160,7 @@ class CohereClient:
         model: str = "rerank-english-v3.0",
         top_n: int = 10,
     ) -> list[tuple[int, float]]:
+        """Re-rank a list of document strings relative to a search query."""
         if not self.api_key:
             raise RuntimeError("COHERE_API_KEY is required for reranking")
 

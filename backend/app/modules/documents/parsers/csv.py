@@ -1,7 +1,3 @@
-"""Schema-aware CSV parser."""
-
-from __future__ import annotations
-
 import csv
 import hashlib
 import io
@@ -12,6 +8,7 @@ from app.modules.documents.parsers.base import BaseParser, ParsedBlock, ParseRes
 
 class CSVParser(BaseParser):
     def parse(self, data: bytes, filename: str) -> ParseResult:
+        """Parse CSV raw bytes into structured table blocks and plain text."""
         text = data.decode("utf-8", errors="replace")
         reader = csv.DictReader(io.StringIO(text))
         fieldnames = reader.fieldnames or []

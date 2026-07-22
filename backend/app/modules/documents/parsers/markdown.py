@@ -1,7 +1,3 @@
-"""Markdown parser preserving heading structure and code blocks accurately."""
-
-from __future__ import annotations
-
 import re
 import unicodedata
 
@@ -12,6 +8,7 @@ class MarkdownParser(BaseParser):
     HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 
     def parse(self, data: bytes, filename: str) -> ParseResult:
+        """Parse Markdown raw bytes into structured headings, code blocks, and prose."""
         text = data.decode("utf-8", errors="replace")
         text = unicodedata.normalize("NFC", text)
 
@@ -22,7 +19,7 @@ class MarkdownParser(BaseParser):
 
         for line in text.splitlines():
             stripped = line.strip()
-            
+
             # Code block detection and grouping
             if stripped.startswith("```"):
                 if in_code_block:

@@ -16,15 +16,16 @@ def classify_query(query: str, history: list[str] | None = None) -> QueryComplex
 
     has_comparison = any(w in tokens for w in ("compare", "versus", "vs", "difference"))
     has_multi_hop = any(
-        phrase in query.lower()
-        for phrase in ("and then", "after that", "based on")
+        phrase in query.lower() for phrase in ("and then", "after that", "based on")
     )
     has_aggregation = any(
         w in tokens for w in ("summarize", "list", "overview", "analyze")
     )
     is_short = len(tokens) <= 5
     is_question = query.strip().endswith("?")
-    has_context_dependency = any(w in tokens for w in ("it", "this", "that", "they", "them"))
+    has_context_dependency = any(
+        w in tokens for w in ("it", "this", "that", "they", "them")
+    )
 
     complexity_score = sum(
         [

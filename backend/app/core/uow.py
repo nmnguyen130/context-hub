@@ -1,10 +1,10 @@
 import logging
 from typing import Self
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.context import RequestContext
+from app.core.context import RequestContext, bind_context
 from app.core.events import DomainEventsMixin, OutboxEvent
 
 logger = logging.getLogger(__name__)
@@ -25,24 +25,30 @@ class UnitOfWork:
         self.session: AsyncSession | None = None
 
     async def __aenter__(self) -> Self:
-        self.session = self._session_factory()
-        if not self.session.in_transaction():
-            await self.session.begin()
+        # Bind request context so services within this transaction scope can access try_current_context()
+        self._context_manager = bind_context(self._context)
+        self._context_manager.__enter__()
 
-        if self._is_admin:
-            # Owner pool — superuser / owner bypasses RLS naturally, no GUC needed
-            pass
-        else:
-            # Enforce Row-Level Security by binding active tenant ID
+        self.session = self._session_factory()
+
+        if not self._is_admin:
+            # Enforce Row-Level Security by binding active tenant ID on transaction begin.
+            # This is registered as a session event to handle automatic re-begins (e.g. after commits/rollbacks).
             if self._context.tenant_id is None:
                 raise ValueError(
                     "Cannot open tenant-scoped UnitOfWork without tenant_id."
                 )
 
-            await self.session.execute(
-                text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
-                {"tenant_id": str(self._context.tenant_id)},
-            )
+            @event.listens_for(self.session.sync_session, "after_begin")
+            def set_tenant_id(session, transaction, connection):
+                connection.execute(
+                    text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+                    {"tenant_id": str(self._context.tenant_id)},
+                )
+
+        if not self.session.in_transaction():
+            await self.session.begin()
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -57,6 +63,8 @@ class UnitOfWork:
                     )
                 await self.rollback()
         finally:
+            if hasattr(self, "_context_manager"):
+                self._context_manager.__exit__(exc_type, exc_val, exc_tb)
             if self.session:
                 await self.session.close()
 

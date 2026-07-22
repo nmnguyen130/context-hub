@@ -24,7 +24,4 @@ def reciprocal_rank_fusion(
             chunk_map[chunk.id] = chunk
 
     sorted_ids = sorted(scores, key=scores.get, reverse=True)
-    return [
-        replace(chunk_map[cid], rrf_score=scores[cid])
-        for cid in sorted_ids
-    ]
+    return [replace(chunk_map[cid], rrf_score=scores[cid]) for cid in sorted_ids]

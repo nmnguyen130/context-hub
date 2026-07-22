@@ -144,11 +144,14 @@ async def change_password(
 async def list_users(
     pagination: PaginationParams = Depends(),
     is_active: bool | None = None,
+    context: RequestContext = Depends(get_authenticated_context),
     user_service: UserService = Depends(get_service(UserService)),
 ):
     """Lists all users belonging to the current tenant organization."""
     users, total = await user_service.list_users(
-        pagination=pagination, is_active=is_active
+        tenant_id=context.tenant_id,
+        pagination=pagination,
+        is_active=is_active,
     )
     return PaginatedResponse[UserResponse].create(
         items=users, total=total, pagination=pagination
@@ -228,16 +231,18 @@ async def create_invitation(
 @auth_router.get(
     "/invitations",
     response_model=PaginatedResponse[InvitationResponse],
-    dependencies=[Depends(require_roles(UserRole.ADMIN, UserRole.OWNER))],
 )
 async def list_invitations(
     pagination: PaginationParams = Depends(),
     status: InvitationStatus | None = None,
+    context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
     """Lists all invitations sent from this tenant. Admin only."""
     items, total = await invite_service.list_invitations(
-        status=status, pagination=pagination
+        tenant_id=context.tenant_id,
+        status=status,
+        pagination=pagination,
     )
     return PaginatedResponse[InvitationResponse].create(
         items=items, total=total, pagination=pagination

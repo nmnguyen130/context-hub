@@ -1,7 +1,3 @@
-"""Chunker factory selecting strategy per content type."""
-
-from __future__ import annotations
-
 from app.modules.documents.chunkers.base import ChunkResult
 from app.modules.documents.chunkers.code import CodeChunker
 from app.modules.documents.chunkers.sliding_window import SlidingWindowChunker
@@ -10,8 +6,10 @@ from app.modules.documents.chunkers.table import TableChunker
 from app.modules.documents.parsers.base import ParsedBlock
 
 
-def select_chunks(text: str, blocks: list[ParsedBlock] | None = None) -> list[ChunkResult]:
-    """Choose the cheapest adequate chunking strategy."""
+def select_chunks(
+    text: str, blocks: list[ParsedBlock] | None = None
+) -> list[ChunkResult]:
+    """Select and apply the best chunking strategy based on content types."""
     if blocks:
         has_headings = any(b.content_type == "heading" for b in blocks)
         has_tables = any(b.content_type == "table" for b in blocks)
@@ -20,9 +18,13 @@ def select_chunks(text: str, blocks: list[ParsedBlock] | None = None) -> list[Ch
         if has_tables:
             table_chunks = TableChunker().chunk(text, blocks)
             if table_chunks:
-                prose_blocks = [b for b in blocks if b.content_type not in ("table",)]
+                prose_blocks = [b for b in blocks if b.content_type != "table"]
                 prose_text = "\n".join(b.text for b in prose_blocks if b.text.strip())
-                other = StructuralChunker().chunk(prose_text, prose_blocks) if has_headings else SlidingWindowChunker().chunk(prose_text)
+                other = (
+                    StructuralChunker().chunk(prose_text, prose_blocks)
+                    if has_headings
+                    else SlidingWindowChunker().chunk(prose_text, prose_blocks)
+                )
                 return _reindex(table_chunks + other)
 
         if has_code:
