@@ -56,7 +56,7 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 - [x] Build a Python module implementing Reciprocal Rank Fusion (RRF) combining dense search rank and sparse search rank.
 - [x] Set up Cohere Rerank API integration (and zero-cost ContextBoostReranker) to refine candidate chunks.
 
-### [/] Task 2.3: Grounded Conversational AI Stream
+### [x] Task 2.3: Grounded Conversational AI Stream (Backend Complete)
 - [x] Implement streaming API router `/api/v1/chat/stream` in FastAPI.
 - [x] Draft system prompt instructing Gemini to rely exclusively on context and output citations.
 - [x] Write Python parser extracting chunk citations from LLM responses, retrieving referenced chunk metadata, and building a structured JSON response payload alongside the text stream.

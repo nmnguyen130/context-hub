@@ -1,23 +1,17 @@
 """add_rls_policies
 
 Revision ID: 4f564995524f
-Revises: 3074746b1319
-Create Date: 2026-07-20 03:47:43.235626
+Revises: 2307f98c5eff
+Create Date: 2026-07-22 21:04:00.000000
 
 """
-# ruff: noqa: F401
 from typing import Sequence
 
 from alembic import op
-import sqlalchemy as sa
-import pgvector
-
-# auto-generated imports
-
 
 # revision identifiers, used by Alembic.
-revision: str = '4f564995524f'
-down_revision: str | None = '3074746b1319'
+revision: str = "4f564995524f"
+down_revision: str | None = "2307f98c5eff"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -32,6 +26,8 @@ def upgrade() -> None:
         "invitations",
         "refresh_tokens",
         "document_chunks",
+        "chat_sessions",
+        "chat_messages",
     ]
     for table in rls_tables:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
@@ -55,6 +51,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Drop RLS policies
     rls_tables = [
+        "chat_messages",
+        "chat_sessions",
         "document_chunks",
         "refresh_tokens",
         "invitations",

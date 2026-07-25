@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     RAG_SEMANTIC_CACHE_TTL: int = 3600
     RAG_HYDE_CHUNK_THRESHOLD: int = 500
     RAG_ALLOWED_EXTENSIONS: str = ".pdf,.docx,.md,.txt,.csv,.json"
+    RAG_CRAG_RETRY_ENABLED: bool = True
 
     # Cache
     ENABLE_SEMANTIC_CACHE: bool = True

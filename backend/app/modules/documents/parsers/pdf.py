@@ -1,66 +1,40 @@
-import unicodedata
-
 import pymupdf
 import pymupdf4llm
 
-from app.modules.documents.parsers.base import BaseParser, ParsedBlock, ParseResult
+from app.modules.documents.parsers.markdown_scanner import scan_markdown_lines
+from app.modules.documents.parsers.types import ContentBlock, ParseResult
 
 
-class PDFParser(BaseParser):
-    def parse(self, data: bytes, filename: str) -> ParseResult:
-        """Parse PDF raw bytes into structured markdown blocks and prose with page numbers."""
-        doc = pymupdf.open(stream=data, filetype="pdf")
+def parse_pdf(data: bytes, filename: str) -> ParseResult:
+    """Universal layout-aware PDF parser for academic papers, legal contracts, reports, and CVs."""
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    blocks: list[ContentBlock] = []
+    full_text_parts: list[str] = []
 
-        blocks: list[ParsedBlock] = []
-        full_text_parts: list[str] = []
+    try:
+        page_chunks = pymupdf4llm.to_markdown(
+            doc,
+            page_chunks=True,
+            header=False,
+            footer=False,
+            ignore_images=True,
+            force_text=True,
+        )
+        for page_idx, page in enumerate(page_chunks):
+            page_number = page.get("metadata", {}).get("page", page_idx + 1)
+            page_md = page.get("text", "")
 
-        try:
-            # Single-pass page chunk extraction for high efficiency
-            page_chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
-            for page_idx, page in enumerate(page_chunks):
-                page_number = page.get("metadata", {}).get("page", page_idx + 1)
-                page_md = page.get("text", "")
+            if page_md.strip():
                 full_text_parts.append(page_md)
 
-                normalized = unicodedata.normalize("NFC", page_md)
-                for line in normalized.splitlines():
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
+            blocks.extend(
+                scan_markdown_lines(page_md.splitlines(), page_number=page_number)
+            )
+    finally:
+        doc.close()
 
-                    if stripped.startswith("## "):
-                        blocks.append(
-                            ParsedBlock(
-                                text=stripped[3:].strip(),
-                                page_number=page_number,
-                                heading_level=2,
-                                content_type="heading",
-                            )
-                        )
-                    elif stripped.startswith("# "):
-                        blocks.append(
-                            ParsedBlock(
-                                text=stripped[2:].strip(),
-                                page_number=page_number,
-                                heading_level=1,
-                                content_type="heading",
-                            )
-                        )
-                    else:
-                        blocks.append(
-                            ParsedBlock(
-                                text=stripped,
-                                page_number=page_number,
-                                content_type="prose",
-                            )
-                        )
-        finally:
-            doc.close()
-
-        full_text = "\n\n".join(full_text_parts)
-
-        return ParseResult(
-            blocks=blocks,
-            full_text=full_text,
-            metadata={"file_type": "application/pdf", "document_name": filename},
-        )
+    return ParseResult(
+        blocks=blocks,
+        full_text="\n\n".join(full_text_parts),
+        metadata={"file_type": "application/pdf", "document_name": filename},
+    )

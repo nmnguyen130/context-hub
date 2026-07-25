@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-from app.modules.documents.chunkers.base import ChunkResult
+from app.modules.documents.chunkers.types import Chunk
 
 STOPWORDS = frozenset(
     {
@@ -53,7 +53,7 @@ def extract_topic_tags(text: str, top_n: int = 5) -> list[str]:
 
 
 def enrich_chunk(
-    chunk: ChunkResult,
+    chunk: Chunk,
     *,
     document_name: str,
     workspace_name: str,
@@ -61,14 +61,15 @@ def enrich_chunk(
 ) -> dict:
     """Enrich chunk metadata with document-level context and topic tags."""
     meta = chunk.metadata
+    heading_trail_list = list(meta.heading_trail)
     return {
-        "page_numbers": meta.page_numbers,
-        "parent_headers": meta.parent_headers,
+        "page_numbers": list(meta.page_numbers),
+        "heading_trail": heading_trail_list,
+        "parent_headers": heading_trail_list,
         "char_start": meta.char_start,
         "char_end": meta.char_end,
         "content_type": meta.content_type,
         "language": meta.language,
-        "chunker_used": meta.chunker_used,
         "topic_tags": extract_topic_tags(chunk.content),
         "document_name": document_name,
         "workspace_name": workspace_name,

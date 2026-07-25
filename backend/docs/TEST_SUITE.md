@@ -48,6 +48,29 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
   * `test_jwt_decode_type_validation`: Verifies decode raises ValueError on token type mismatches.
   * `test_request_context_propagation`: Verifies RequestContext thread-local storage propagation using context managers.
 
+* **test_parsers_chunkers.py**
+  * `test_detect_mime_type`: Verifies automatic detection of MIME types from filename extensions and fallbacks.
+  * `test_plaintext_parser`: Verifies line-by-line parsing of raw text files into structured prose blocks.
+  * `test_markdown_parser`: Verifies header, prose, and fenced code block extraction with metadata.
+  * `test_csv_parser`: Verifies table schema extraction, row formatting, and schema hashing.
+  * `test_document_assembler`: Verifies unified structural chunking, lineage header injection, table preservation, and formula block handling.
+  * `test_numbered_subsection_heading_classification`: Verifies regex classification of numbered headings (e.g. 3.1, 3.1.2) vs formulas.
+  * `test_section_aware_chunk_boundaries`: Verifies clean section flushes without cross-section tail overlap contamination.
+
+* **test_chat_module.py**
+  * `test_query_classifier`: Verifies query classification heuristics (SIMPLE vs COMPLEX).
+  * `test_reciprocal_rank_fusion`: Verifies Reciprocal Rank Fusion (RRF) score merging across dense and sparse ranks.
+  * `test_relevance_grader`: Verifies Corrective RAG (CRAG) relevance scoring and filtering.
+  * `test_citation_extraction`: Verifies strict inline citation extraction `[^[id]]` and metadata attachment.
+  * `test_prompt_building`: Verifies grounded synthesis prompt construction with retrieved context lineage.
+  * `test_cosine_similarity`: Verifies vector similarity math calculations.
+  * `test_semantic_cache_operations`: Verifies Redis semantic query caching operations.
+  * `test_schemas_validation`: Verifies chat request and response schema serialization.
+
+* **test_pdf_rag_pipeline.py**
+  * `test_pdf_end_to_end_rag_pipeline`: Integration test verifying full PDF parsing, DLP scan, structural chunking, hybrid retrieval, and grounded citation synthesis.
+
+
 ### Integration Tests (tests/integration/)
 
 * **test_rls_isolation.py**
@@ -58,6 +81,14 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
   * `test_user_service_cannot_demote_last_admin`: Verifies that UserService rejects demoting a tenant's last admin.
   * `test_user_service_cannot_deactivate_self`: Verifies that UserService rejects self-deactivation.
   * `test_invitation_service_flow`: Verifies invitation creation, retrieval, listing, and revocation.
+
+* **test_document_services.py**
+  * `test_workspace_service_lifecycle`: Verifies workspace creation, duplicate slug prevention (409), listing, and updates.
+  * `test_document_service_lifecycle`: Verifies document file upload, SHA-256 content deduplication (409), listing, deletion, and 404 handling.
+
+* **test_search_queries.py**
+  * `test_dense_search_query`: Verifies pgvector dense HNSW cosine similarity search score ranking and workspace filtering.
+  * `test_sparse_search_query`: Verifies tsvector full-text search indexing, search vector updates, and keyword matching.
 
 ### API Endpoint Tests (tests/api/)
 
