@@ -6,6 +6,8 @@ from app.modules.chat.generation.prompts import build_grounded_prompt
 from app.modules.chat.schemas import SSEEvent
 from app.modules.documents.schemas import ScoredChunk
 
+MAX_TOKENS_SAFETY_LIMIT = 10_000
+
 
 async def stream_synthesis(
     query: str,
@@ -42,8 +44,10 @@ async def stream_synthesis(
         ):
             full_text_chunks.append(token)
             yield SSEEvent(type="token", data={"text": token})
-    except Exception as exc:
-        yield SSEEvent(type="error", data={"message": str(exc)})
+            if len(full_text_chunks) >= MAX_TOKENS_SAFETY_LIMIT:
+                break
+    except Exception:
+        yield SSEEvent(type="error", data={"message": "Assistant generation failed."})
         return
 
     full_text = "".join(full_text_chunks)

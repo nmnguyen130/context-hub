@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from dataclasses import dataclass
 
@@ -34,33 +35,30 @@ async def retrieve_context(
         query_plan.queries[0] if query_plan.queries else ""
     )
 
-    all_dense_results: list[list[ScoredChunk]] = []
-    all_sparse_results: list[list[ScoredChunk]] = []
-
-    # 1. Parallel dense + sparse searches for each query/embedding pair in plan
-    for query_text, embedding in zip(
-        query_plan.queries, query_plan.embeddings, strict=False
-    ):
-        dense_res = await dense_search(
+    # 1. Parallel dense + sparse searches for all queries in plan
+    dense_tasks = [
+        dense_search(
             session=session,
             embedding=embedding,
             workspace_ids=workspace_ids,
             tenant_id=tenant_id,
             limit=50,
         )
-        sparse_res = await sparse_search(
+        for embedding in query_plan.embeddings
+    ]
+    sparse_tasks = [
+        sparse_search(
             session=session,
-            query=query_text,
+            query=query,
             workspace_ids=workspace_ids,
             tenant_id=tenant_id,
             limit=50,
         )
-        if dense_res:
-            all_dense_results.append(dense_res)
-        if sparse_res:
-            all_sparse_results.append(sparse_res)
+        for query in query_plan.queries
+    ]
 
-    result_sets = all_dense_results + all_sparse_results
+    search_results = await asyncio.gather(*dense_tasks, *sparse_tasks)
+    result_sets = [res for res in search_results if res]
     if not result_sets:
         grading = grade_relevance([], threshold=settings.RAG_RELEVANCE_THRESHOLD)
         return RetrievalResult(

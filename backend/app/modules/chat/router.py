@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request, status
@@ -5,8 +6,8 @@ from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_authenticated_context, get_service
 from app.core.context import RequestContext
+from app.core.exceptions import ServiceError
 from app.core.pagination import PaginatedResponse, PaginationParams
-from app.core.uow import UnitOfWork
 from app.modules.chat.memory import ChatSessionService
 from app.modules.chat.schemas import (
     ChatMessageResponse,
@@ -14,8 +15,11 @@ from app.modules.chat.schemas import (
     ChatSessionCreate,
     ChatSessionResponse,
     ChatSessionUpdate,
+    SSEEvent,
 )
 from app.modules.chat.services import ChatService
+
+logger = logging.getLogger(__name__)
 
 chat_router = APIRouter(
     prefix="/chat",
@@ -41,14 +45,22 @@ async def stream_chat(
         try:
             async for event in service.process_query(body, context):
                 yield f"data: {event.model_dump_json()}\n\n"
-
                 if await request.is_disconnected():
                     break
-        except Exception as exc:
-            err_payload = {"type": "error", "data": {"message": str(exc)}}
-            yield f"data: {ChatMessageResponse.model_validate(err_payload).model_dump_json()}\n\n"
-
-        yield "data: [DONE]\n\n"
+            else:
+                yield "data: [DONE]\n\n"
+        except ServiceError as exc:
+            event = SSEEvent(type="error", data={"message": exc.detail})
+            yield f"data: {event.model_dump_json()}\n\n"
+        except Exception:
+            logger.exception("Chat stream failed")
+            event = SSEEvent(
+                type="error",
+                data={
+                    "message": "An unexpected error occurred while processing your chat request."
+                },
+            )
+            yield f"data: {event.model_dump_json()}\n\n"
 
     return StreamingResponse(
         event_generator(),

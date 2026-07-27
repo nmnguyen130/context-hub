@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.api.middleware import RequestContextMiddleware
 from app.api.router import api_router
+from app.core.clients import CohereClient
 from app.core.config import settings
 from app.core.database import app_engine, app_session, owner_engine
 from app.core.exceptions import register_exception_handlers
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     # Startup
     app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
     app.state.storage = S3StorageProvider()
+    app.state.cohere = CohereClient()
 
     # Preload rate limiter Lua script
     app.state.limiter_script = app.state.redis.register_script(LUA_SLIDING_WINDOW)

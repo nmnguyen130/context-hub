@@ -3,11 +3,10 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-import redis.asyncio as aioredis
-
 from app.core.clients import CohereClient, GeminiClient
 from app.core.config import settings
 from app.core.context import RequestContext
+from app.core.exceptions import ServiceError
 from app.core.uow import UnitOfWork
 from app.modules.chat.cache.semantic_cache import SemanticCache
 from app.modules.chat.generation import stream_synthesis
@@ -22,6 +21,7 @@ from app.modules.chat.query.rewriter import rewrite_query
 from app.modules.chat.retrieval import Reranker, retrieve_context
 from app.modules.chat.schemas import ChatRequest, ChatSessionCreate, SSEEvent
 from app.modules.documents.embeddings import EmbeddingProvider
+from app.modules.documents.models import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,6 @@ class ChatService:
     def __init__(
         self,
         uow: UnitOfWork,
-        redis_client: aioredis.Redis | None = None,
         gemini_client: GeminiClient | None = None,
         cohere_client: CohereClient | None = None,
     ) -> None:
@@ -38,7 +37,7 @@ class ChatService:
         self.gemini_client = gemini_client or GeminiClient()
         self.embedder = EmbeddingProvider(client=self.gemini_client)
         self.reranker = Reranker(cohere_client=cohere_client or CohereClient())
-        self.cache = SemanticCache(redis_client=redis_client)
+        self.cache = SemanticCache()
         self.session_service = ChatSessionService(uow=self.uow)
 
     async def process_query(
@@ -74,7 +73,12 @@ class ChatService:
         if not history_texts and settings.ENABLE_SEMANTIC_CACHE:
             try:
                 query_embedding = await self.embedder.embed_query(request.message)
-                cached = await self.cache.get(query_embedding, request.workspace_id)
+                cached = await self.cache.get(
+                    session=self.uow.session,
+                    query_embedding=query_embedding,
+                    workspace_id=request.workspace_id,
+                    tenant_id=context.tenant_id,
+                )
                 if cached:
                     yield SSEEvent(type="sources", data=cached.get("citations", []))
                     yield SSEEvent(type="token", data={"text": cached["content"]})
@@ -96,6 +100,7 @@ class ChatService:
                         retrieved_chunk_ids=[],
                         context=context,
                     )
+                    await self.uow.commit()
                     return
             except Exception as exc:
                 logger.warning("Semantic cache check failed: %s", exc)
@@ -143,6 +148,11 @@ class ChatService:
                 original_query=rewritten,
             )
 
+        # Release DB connection during LLM synthesis
+        running_summary = session.running_summary
+        session_id = session.id
+        await self.uow.commit()
+
         # 7. Generation Pipeline (Streaming Synthesis)
         full_text = ""
         citations: list[dict[str, Any]] = []
@@ -150,7 +160,7 @@ class ChatService:
         async for event in stream_synthesis(
             query=request.message,
             chunks=retrieval.chunks,
-            running_summary=session.running_summary,
+            running_summary=running_summary,
             client=self.gemini_client,
         ):
             yield event
@@ -159,7 +169,8 @@ class ChatService:
             elif event.type == "citations":
                 citations = event.data
 
-        # 8. Persist User and Assistant Messages
+        # 8. Persist User and Assistant Messages in fresh transaction scope
+        session = await self.session_service.get(session_id)
         retrieved_chunk_ids = [str(c.id) for c in retrieval.chunks]
         await self._persist_messages(
             session=session,
@@ -188,24 +199,35 @@ class ChatService:
                 session.id, updated_messages, client=self.gemini_client
             )
 
+        await self.uow.commit()
+
         # Write to Semantic Cache if single-turn query
         if not history_texts and settings.ENABLE_SEMANTIC_CACHE and full_text:
             if query_embedding is None:
                 query_embedding = await self.embedder.embed_query(request.message)
             await self.cache.set(
+                session=self.uow.session,
                 query_embedding=query_embedding,
                 workspace_id=request.workspace_id,
+                tenant_id=context.tenant_id,
                 query_text=request.message,
                 response_text=full_text,
                 citations=citations,
             )
+            await self.uow.commit()
 
     async def _resolve_session(
         self, request: ChatRequest, context: RequestContext
     ) -> ChatSession:
         """Resolve session by ID or create a new session if not supplied."""
+        workspace = await self.uow.session.get(Workspace, request.workspace_id)
+        if workspace is None or workspace.tenant_id != context.tenant_id:
+            raise ServiceError("Workspace not found", status_code=404)
+
         if request.session_id:
-            return await self.session_service.get(request.session_id)
+            return await self.session_service.get(
+                request.session_id, require_owner=True
+            )
 
         create_data = ChatSessionCreate(
             workspace_id=request.workspace_id,

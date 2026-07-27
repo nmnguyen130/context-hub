@@ -1,7 +1,7 @@
 from app.core.database import Base
 from app.core.events import OutboxEvent
 from app.modules.auth.models import Invitation, RefreshToken, User
-from app.modules.chat.models import ChatMessage, ChatSession
+from app.modules.chat.models import ChatCacheEntry, ChatMessage, ChatSession
 from app.modules.documents.models import Document, DocumentChunk, Workspace
 from app.modules.tenant.models import Tenant
 
@@ -19,5 +19,6 @@ __all__ = [
     "DocumentChunk",
     "ChatSession",
     "ChatMessage",
+    "ChatCacheEntry",
     "metadata",
 ]

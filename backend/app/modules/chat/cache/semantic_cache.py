@@ -1,12 +1,14 @@
-import json
 import logging
 import math
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import redis.asyncio as aioredis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.modules.chat.models import ChatCacheEntry
 
 logger = logging.getLogger(__name__)
 
@@ -24,57 +26,50 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
 
 
 class SemanticCache:
-    """Redis-backed semantic cache matching user queries by embedding similarity."""
-
-    def __init__(self, redis_client: aioredis.Redis | None = None) -> None:
-        self.redis = redis_client
+    """pgvector-backed semantic cache matching user queries by embedding similarity."""
 
     async def get(
         self,
+        session: AsyncSession,
         query_embedding: list[float],
         workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
         threshold: float | None = None,
     ) -> dict[str, Any] | None:
-        """Check Redis for a semantically similar cached response for the workspace."""
-        if not settings.ENABLE_SEMANTIC_CACHE or self.redis is None:
+        """Query pgvector for a semantically similar cached response for the workspace."""
+        if not settings.ENABLE_SEMANTIC_CACHE:
             return None
 
         threshold = threshold or settings.SEMANTIC_CACHE_THRESHOLD
-        pattern = f"semcache:{workspace_id}:*"
+        max_distance = 1.0 - threshold
+        now = datetime.now(UTC)
 
         try:
-            keys = await self.redis.keys(pattern)
-            if not keys:
-                return None
-
-            best_similarity = 0.0
-            best_cached: dict[str, Any] | None = None
-
-            for key in keys:
-                raw_data = await self.redis.get(key)
-                if not raw_data:
-                    continue
-
-                entry = json.loads(raw_data)
-                cached_emb = entry.get("embedding", [])
-                sim = cosine_similarity(query_embedding, cached_emb)
-
-                if sim > best_similarity:
-                    best_similarity = sim
-                    best_cached = entry
-
-            if best_similarity >= threshold and best_cached is not None:
+            dist = ChatCacheEntry.query_embedding.cosine_distance(query_embedding)
+            stmt = (
+                select(ChatCacheEntry, dist.label("distance"))
+                .where(
+                    ChatCacheEntry.tenant_id == tenant_id,
+                    ChatCacheEntry.workspace_id == workspace_id,
+                    ChatCacheEntry.expires_at > now,
+                    dist <= max_distance,
+                )
+                .order_by(dist)
+                .limit(1)
+            )
+            if row := (await session.execute(stmt)).first():
+                entry, distance = row
+                similarity = 1.0 - float(distance)
                 logger.info(
                     "Semantic cache HIT (similarity: %.4f >= threshold: %.4f)",
-                    best_similarity,
+                    similarity,
                     threshold,
                 )
                 return {
-                    "content": best_cached.get("response", ""),
-                    "citations": best_cached.get("citations", []),
-                    "similarity": best_similarity,
+                    "content": entry.response_text,
+                    "citations": entry.citations or [],
+                    "similarity": similarity,
                 }
-
         except Exception as exc:
             logger.warning("Semantic cache lookup failed: %s", exc)
 
@@ -82,30 +77,34 @@ class SemanticCache:
 
     async def set(
         self,
+        session: AsyncSession,
         query_embedding: list[float],
         workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
         query_text: str,
         response_text: str,
         citations: list[dict[str, Any]],
         ttl: int | None = None,
     ) -> None:
-        """Store a new query embedding and response payload in Redis semantic cache."""
-        if not settings.ENABLE_SEMANTIC_CACHE or self.redis is None:
+        """Store a new query embedding and response payload in pgvector semantic cache."""
+        if not settings.ENABLE_SEMANTIC_CACHE:
             return
 
-        ttl = ttl or settings.RAG_SEMANTIC_CACHE_TTL
-        entry_id = uuid.uuid4().hex[:12]
-        key = f"semcache:{workspace_id}:{entry_id}"
-
-        payload = {
-            "embedding": query_embedding,
-            "query": query_text,
-            "response": response_text,
-            "citations": citations,
-        }
-
+        expires_at = datetime.now(UTC) + timedelta(
+            seconds=ttl or settings.RAG_SEMANTIC_CACHE_TTL
+        )
         try:
-            await self.redis.setex(key, ttl, json.dumps(payload))
-            logger.debug("Stored entry %s in semantic cache (TTL=%s)", key, ttl)
+            entry = ChatCacheEntry(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                query_text=query_text,
+                query_embedding=query_embedding,
+                response_text=response_text,
+                citations=citations,
+                expires_at=expires_at,
+            )
+            session.add(entry)
+            await session.flush()
+            logger.debug("Stored entry %s in semantic cache", entry.id)
         except Exception as exc:
             logger.warning("Semantic cache set failed: %s", exc)

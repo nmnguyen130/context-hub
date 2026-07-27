@@ -37,14 +37,19 @@ class ChatSessionService:
         await self.uow.flush()
         return session
 
-    async def get(self, session_id: uuid.UUID) -> ChatSession:
-        """Retrieve a chat session by ID with tenant validation."""
+    async def get(
+        self, session_id: uuid.UUID, require_owner: bool = False
+    ) -> ChatSession:
+        """Retrieve a chat session by ID with tenant and optional user ownership validation."""
         ctx = try_current_context()
         session = await self.uow.session.get(ChatSession, session_id)
         if session is None:
             raise ChatSessionNotFoundError()
 
         if ctx and ctx.tenant_id and session.tenant_id != ctx.tenant_id:
+            raise ChatSessionNotFoundError()
+
+        if require_owner and ctx and ctx.user_id and session.user_id != ctx.user_id:
             raise ChatSessionNotFoundError()
 
         return session

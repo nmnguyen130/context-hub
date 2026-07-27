@@ -5,10 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.core.database import TenantBaseModel
 
 
@@ -68,3 +70,24 @@ class ChatMessage(TenantBaseModel):
     )
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
+class ChatCacheEntry(TenantBaseModel):
+    __tablename__ = "chat_cache"
+    __table_args__ = (Index("ix_chat_cache_workspace", "tenant_id", "workspace_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        index=True,
+    )
+    query_text: Mapped[str] = mapped_column(Text)
+    query_embedding: Mapped[list[float]] = mapped_column(
+        Vector(settings.RAG_EMBEDDING_DIMENSION)
+    )
+    response_text: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
