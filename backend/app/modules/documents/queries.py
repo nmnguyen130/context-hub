@@ -33,33 +33,40 @@ async def dense_search(
     embedding: list[float],
     workspace_ids: list[uuid.UUID],
     tenant_id: uuid.UUID | None = None,
+    document_ids: list[uuid.UUID] | None = None,
     *,
     limit: int = 50,
     ef_search: int = 100,
 ) -> list[ScoredChunk]:
-    """Perform dense similarity search using pgvector with optional tenant isolation."""
+    """Perform dense similarity search using pgvector with optional tenant and document scoping."""
     await session.execute(text(f"SET LOCAL hnsw.ef_search = {int(ef_search)}"))
     embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
+    doc_filter = "AND document_id = ANY(:document_ids)" if document_ids else ""
+    params = {
+        "embedding": embedding_str,
+        "tenant_id": tenant_id,
+        "workspace_ids": workspace_ids,
+        "limit": limit,
+    }
+    if document_ids:
+        params["document_ids"] = document_ids
+
     result = await session.execute(
         text(
-            """
+            f"""
             SELECT id, document_id, content, metadata,
                    1 - (embedding <=> CAST(:embedding AS vector)) AS cosine_score
             FROM document_chunks
             WHERE (CAST(:tenant_id AS uuid) IS NULL OR tenant_id = CAST(:tenant_id AS uuid))
               AND workspace_id = ANY(:workspace_ids)
+              {doc_filter}
               AND is_active = true
               AND embedding IS NOT NULL
             ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
             """
         ),
-        {
-            "embedding": embedding_str,
-            "tenant_id": tenant_id,
-            "workspace_ids": workspace_ids,
-            "limit": limit,
-        },
+        params,
     )
     return [
         ScoredChunk(
@@ -78,30 +85,37 @@ async def sparse_search(
     query: str,
     workspace_ids: list[uuid.UUID],
     tenant_id: uuid.UUID | None = None,
+    document_ids: list[uuid.UUID] | None = None,
     *,
     limit: int = 50,
 ) -> list[ScoredChunk]:
-    """Perform sparse full-text search using PostgreSQL tsquery with optional tenant isolation."""
+    """Perform sparse full-text search using PostgreSQL tsquery with optional tenant and document scoping."""
+    doc_filter = "AND document_id = ANY(:document_ids)" if document_ids else ""
+    params = {
+        "query": query,
+        "tenant_id": tenant_id,
+        "workspace_ids": workspace_ids,
+        "limit": limit,
+    }
+    if document_ids:
+        params["document_ids"] = document_ids
+
     result = await session.execute(
         text(
-            """
+            f"""
             SELECT id, document_id, content, metadata,
                    ts_rank_cd(search_vector, websearch_to_tsquery('english', :query)) AS fts_score
             FROM document_chunks
             WHERE (CAST(:tenant_id AS uuid) IS NULL OR tenant_id = CAST(:tenant_id AS uuid))
               AND workspace_id = ANY(:workspace_ids)
+              {doc_filter}
               AND is_active = true
               AND search_vector @@ websearch_to_tsquery('english', :query)
             ORDER BY fts_score DESC
             LIMIT :limit
             """
         ),
-        {
-            "query": query,
-            "tenant_id": tenant_id,
-            "workspace_ids": workspace_ids,
-            "limit": limit,
-        },
+        params,
     )
     return [
         ScoredChunk(

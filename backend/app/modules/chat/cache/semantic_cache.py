@@ -43,7 +43,9 @@ class SemanticCache:
         if not settings.ENABLE_SEMANTIC_CACHE:
             return None
 
-        threshold = threshold or self.default_threshold or settings.SEMANTIC_CACHE_THRESHOLD
+        threshold = (
+            threshold or self.default_threshold or settings.SEMANTIC_CACHE_THRESHOLD
+        )
         max_distance = 1.0 - threshold
         now = datetime.now(UTC)
 

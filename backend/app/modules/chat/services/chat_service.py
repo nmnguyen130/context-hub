@@ -8,7 +8,6 @@ from app.core.config import settings
 from app.core.context import RequestContext
 from app.core.exceptions import ServiceError
 from app.core.uow import UnitOfWork
-from app.utils.pricing import calculate_model_cost
 from app.modules.chat.cache.semantic_cache import SemanticCache
 from app.modules.chat.generation import stream_synthesis
 from app.modules.chat.grounding import check_faithfulness, compute_composite_confidence
@@ -24,6 +23,7 @@ from app.modules.chat.retrieval import Reranker, retrieve_context
 from app.modules.chat.schemas import ChatRequest, ChatSessionCreate, SSEEvent
 from app.modules.documents.embeddings import EmbeddingProvider
 from app.modules.documents.models import Workspace
+from app.utils.pricing import calculate_model_cost
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,7 @@ class ChatService:
             session=self.uow.session,
             reranker=self.reranker,
             original_query=request.message,
+            document_ids=request.document_ids,
         )
 
         # 6. Corrective RAG (CRAG) Retry logic on low confidence
@@ -152,6 +153,7 @@ class ChatService:
                 session=self.uow.session,
                 reranker=self.reranker,
                 original_query=rewritten,
+                document_ids=request.document_ids,
             )
 
         # Release DB connection during LLM synthesis
@@ -190,7 +192,9 @@ class ChatService:
 
         # Calculate cost via model pricing utility
         prompt_tokens = usage_data.get("prompt_tokens") or len(request.message.split())
-        completion_tokens = usage_data.get("completion_tokens") or len(full_text.split())
+        completion_tokens = usage_data.get("completion_tokens") or len(
+            full_text.split()
+        )
         cost_usd = calculate_model_cost(
             model_name=settings.RAG_CHAT_MODEL,
             prompt_tokens=prompt_tokens,

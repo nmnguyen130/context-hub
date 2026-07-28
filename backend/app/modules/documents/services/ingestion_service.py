@@ -2,7 +2,7 @@ import io
 import logging
 import uuid
 
-from sqlalchemy import delete
+from sqlalchemy import update
 
 from app.core.uow import UnitOfWork
 from app.infrastructure.storage import StorageProvider
@@ -66,11 +66,15 @@ class IngestionService:
             if not chunks:
                 raise ValueError("No chunks produced from document")
 
+            # Deactivate previous active chunks for this document (soft inactivation for version audit history)
             await self.uow.session.execute(
-                delete(DocumentChunk).where(
+                update(DocumentChunk)
+                .where(
                     DocumentChunk.tenant_id == document.tenant_id,
                     DocumentChunk.document_id == document_id,
+                    DocumentChunk.is_active.is_(True),
                 )
+                .values(is_active=False)
             )
 
             texts = [c.content for c in chunks]
@@ -83,6 +87,7 @@ class IngestionService:
                     document_name=document.filename,
                     workspace_name=workspace.name,
                     file_type=document.mime_type,
+                    document_version=document.version,
                 )
                 db_chunks.append(
                     DocumentChunk(
@@ -90,10 +95,12 @@ class IngestionService:
                         document_id=document.id,
                         workspace_id=document.workspace_id,
                         chunk_index=chunk.chunk_index,
+                        version=document.version,
                         content=chunk.content,
                         token_count=chunk.token_count,
                         embedding=embedding,
                         metadata_=metadata,
+                        is_active=True,
                     )
                 )
 

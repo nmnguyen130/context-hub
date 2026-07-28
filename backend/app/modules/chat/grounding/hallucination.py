@@ -1,8 +1,8 @@
 import re
 from typing import Any
 
-from app.modules.documents.schemas import ScoredChunk
 from app.modules.chat.text_utils import tokenize as _tokenize
+from app.modules.documents.schemas import ScoredChunk
 
 
 def check_faithfulness(
@@ -58,7 +58,11 @@ def check_faithfulness(
             status = "UNGROUNDED"
 
         sentence_results.append(
-            {"sentence": sentence, "status": status, "coverage": round(best_coverage, 3)}
+            {
+                "sentence": sentence,
+                "status": status,
+                "coverage": round(best_coverage, 3),
+            }
         )
 
     faithfulness_score = min(1.0, max(0.0, grounded_score_sum / len(sentences)))

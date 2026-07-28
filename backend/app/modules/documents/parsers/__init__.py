@@ -58,8 +58,7 @@ def parse_csv(data: bytes, filename: str, batch_size: int = 25) -> ParseResult:
     separator = " | ".join("---" for _ in fieldnames)
 
     row_lines = [
-        " | ".join(str(row.get(col, "")) for col in fieldnames)
-        for row in reader
+        " | ".join(str(row.get(col, "")) for col in fieldnames) for row in reader
     ]
 
     blocks: list[ContentBlock] = []

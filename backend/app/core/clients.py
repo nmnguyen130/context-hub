@@ -147,7 +147,9 @@ class GeminiClient:
                     if usage_info and "usageMetadata" in chunk:
                         meta = chunk["usageMetadata"]
                         usage_info.prompt_tokens = meta.get("promptTokenCount", 0)
-                        usage_info.completion_tokens = meta.get("candidatesTokenCount", 0)
+                        usage_info.completion_tokens = meta.get(
+                            "candidatesTokenCount", 0
+                        )
                         usage_info.total_tokens = meta.get("totalTokenCount", 0)
 
                     parts = (

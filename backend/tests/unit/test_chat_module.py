@@ -108,7 +108,10 @@ def test_prompt_building_and_history():
         query="Explain RAG guidelines",
         chunks=[c1],
         running_summary="User is setting up search.",
-        history=["user: What is ContextHub?", "assistant: ContextHub is an AI platform."],
+        history=[
+            "user: What is ContextHub?",
+            "assistant: ContextHub is an AI platform.",
+        ],
     )
 
     assert "ContextHub" in system

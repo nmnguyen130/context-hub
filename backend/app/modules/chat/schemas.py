@@ -16,6 +16,9 @@ class ChatRequest(BaseModel):
     model: str | None = Field(
         default=None, description="Optional custom model override"
     )
+    document_ids: list[uuid.UUID] | None = Field(
+        default=None, description="Optional list of document IDs to scope search"
+    )
 
 
 class ChatSessionCreate(BaseModel):
@@ -53,7 +56,16 @@ class ChatMessageResponse(BaseModel):
     confidence_score: float | None = None
     token_count: int
     cost_usd: float
+    feedback: str | None = None
+    feedback_note: str | None = None
     created_at: datetime
+
+
+class ChatMessageFeedbackUpdate(BaseModel):
+    feedback: str = Field(..., description="Feedback rating e.g. 'up' or 'down'")
+    feedback_note: str | None = Field(
+        default=None, max_length=2000, description="Optional feedback explanation note"
+    )
 
 
 class CitationDetail(BaseModel):

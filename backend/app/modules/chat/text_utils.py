@@ -1,8 +1,28 @@
 import re
 
 STOPWORDS: set[str] = {
-    "the", "a", "an", "is", "are", "was", "were", "and", "or", "in", "on",
-    "at", "to", "for", "of", "with", "it", "this", "that", "from", "by", "as"
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "and",
+    "or",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "it",
+    "this",
+    "that",
+    "from",
+    "by",
+    "as",
 }
 
 

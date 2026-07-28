@@ -99,7 +99,9 @@ def test_document_assembler_and_offsets():
 def test_dlp_mask_and_unmask_roundtrip():
     """Test DLP PII masking and unmasking roundtrip."""
     raw_text = "Please contact support@company.com or call 123-45-6789 for help."
-    masked_text, warnings, vault = apply_dlp(raw_text, workspace_dlp_rules={"action": "MASK"})
+    masked_text, warnings, vault = apply_dlp(
+        raw_text, workspace_dlp_rules={"action": "MASK"}
+    )
 
     assert "support@company.com" not in masked_text
     assert "123-45-6789" not in masked_text

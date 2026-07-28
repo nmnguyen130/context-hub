@@ -141,7 +141,9 @@ class DocumentService:
 
         mime_type = detect_mime_type(filename, content_type)
         document_id = uuid.uuid4()
-        storage_key = f"tenants/{context.tenant_id}/documents/{document_id}/{filename}"
+        storage_key = (
+            f"tenants/{context.tenant_id}/documents/{document_id}/v1/{filename}"
+        )
 
         await storage.upload_file(io.BytesIO(content), storage_key)
 
@@ -154,6 +156,7 @@ class DocumentService:
             file_size=len(content),
             content_hash=content_hash,
             storage_key=storage_key,
+            version=1,
             uploaded_by=context.user_id,
             status=DocumentStatus.PENDING,
             metadata_={"workspace_name": workspace.name},
@@ -174,6 +177,49 @@ class DocumentService:
         document = await self.uow.session.get(Document, document_id)
         if document is None:
             raise ServiceError("Document not found.", status_code=404)
+        return document
+
+    async def reingest(
+        self,
+        *,
+        document_id: uuid.UUID,
+        filename: str,
+        content: bytes,
+        content_type: str | None,
+        storage: StorageProvider,
+        context: RequestContext,
+    ) -> Document:
+        """Re-ingest a document with updated content, incrementing its version."""
+        await self._validate_file(filename, content)
+
+        document = await self.get(document_id)
+        if document.tenant_id != context.tenant_id:
+            raise ServiceError("Document not found.", status_code=404)
+
+        content_hash = hashlib.sha256(content).hexdigest()
+        mime_type = detect_mime_type(filename, content_type)
+        new_version = document.version + 1
+        storage_key = f"tenants/{context.tenant_id}/documents/{document_id}/v{new_version}/{filename}"
+
+        await storage.upload_file(io.BytesIO(content), storage_key)
+
+        document.filename = filename
+        document.mime_type = mime_type
+        document.file_size = len(content)
+        document.content_hash = content_hash
+        document.storage_key = storage_key
+        document.version = new_version
+        document.status = DocumentStatus.PENDING
+        document.error_message = None
+
+        document.record_event(
+            "documents.process_ingestion",
+            {
+                "document_id": str(document.id),
+                "tenant_id": str(context.tenant_id),
+            },
+        )
+        await self.uow.flush()
         return document
 
     async def list_by_workspace(

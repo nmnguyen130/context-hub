@@ -172,3 +172,104 @@ async def test_sparse_search_query(uow, make_tenant_uow):
         )
         assert len(results_python) == 1
         assert results_python[0].id == chunk_b.id
+
+
+@pytest.mark.integration
+async def test_document_scope_filtering(uow, make_tenant_uow):
+    """Test dense_search and sparse_search filtering by document_ids."""
+    tenant = make_tenant()
+    uow.session.add(tenant)
+    await uow.flush()
+
+    workspace = Workspace(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Scope Workspace",
+        slug="scope-ws",
+    )
+    doc1 = Document(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        workspace_id=workspace.id,
+        filename="doc1.txt",
+        mime_type="text/plain",
+        file_size=100,
+        content_hash="hash1",
+        storage_key="key1",
+        status=DocumentStatus.ACTIVE,
+    )
+    doc2 = Document(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        workspace_id=workspace.id,
+        filename="doc2.txt",
+        mime_type="text/plain",
+        file_size=100,
+        content_hash="hash2",
+        storage_key="key2",
+        status=DocumentStatus.ACTIVE,
+    )
+
+    from app.core.config import settings
+
+    dim = settings.RAG_EMBEDDING_DIMENSION
+    vec = [1.0] + [0.0] * (dim - 1)
+
+    chunk_doc1 = DocumentChunk(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        document_id=doc1.id,
+        workspace_id=workspace.id,
+        chunk_index=0,
+        content="Alpha content in doc1",
+        token_count=5,
+        embedding=vec,
+        is_active=True,
+    )
+    chunk_doc2 = DocumentChunk(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        document_id=doc2.id,
+        workspace_id=workspace.id,
+        chunk_index=0,
+        content="Alpha content in doc2",
+        token_count=5,
+        embedding=vec,
+        is_active=True,
+    )
+
+    uow.session.add_all([workspace, doc1, doc2, chunk_doc1, chunk_doc2])
+    await uow.commit()
+
+    async with make_tenant_uow(tenant.id) as tenant_uow:
+        await update_search_vectors(tenant_uow.session, [chunk_doc1.id, chunk_doc2.id])
+        await tenant_uow.commit()
+
+        # Search without document filter returns both chunks
+        all_dense = await dense_search(
+            session=tenant_uow.session,
+            embedding=vec,
+            workspace_ids=[workspace.id],
+        )
+        assert len(all_dense) == 2
+
+        # Search scoped ONLY to doc1 returns only chunk_doc1
+        scoped_dense = await dense_search(
+            session=tenant_uow.session,
+            embedding=vec,
+            workspace_ids=[workspace.id],
+            document_ids=[doc1.id],
+        )
+        assert len(scoped_dense) == 1
+        assert scoped_dense[0].id == chunk_doc1.id
+
+        # Sparse search scoped ONLY to doc2 returns only chunk_doc2
+        scoped_sparse = await sparse_search(
+            session=tenant_uow.session,
+            query="Alpha",
+            workspace_ids=[workspace.id],
+            document_ids=[doc2.id],
+        )
+        assert len(scoped_sparse) == 1
+        assert scoped_sparse[0].id == chunk_doc2.id
+

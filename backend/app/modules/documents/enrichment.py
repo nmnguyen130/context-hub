@@ -58,8 +58,9 @@ def enrich_chunk(
     document_name: str,
     workspace_name: str,
     file_type: str,
+    document_version: int = 1,
 ) -> dict:
-    """Enrich chunk metadata with document-level context and topic tags."""
+    """Enrich chunk metadata with document-level context, versioning, and topic tags."""
     meta = chunk.metadata
     heading_trail_list = list(meta.heading_trail)
     return {
@@ -74,5 +75,6 @@ def enrich_chunk(
         "document_name": document_name,
         "workspace_name": workspace_name,
         "file_type": file_type,
+        "document_version": document_version,
         **meta.extra,
     }

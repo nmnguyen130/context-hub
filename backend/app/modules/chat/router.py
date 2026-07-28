@@ -11,6 +11,7 @@ from app.core.pagination import PaginatedResponse, PaginationParams
 from app.infrastructure.rate_limiter import PlanPolicyProvider, RateLimiter
 from app.modules.chat.memory import ChatSessionService
 from app.modules.chat.schemas import (
+    ChatMessageFeedbackUpdate,
     ChatMessageResponse,
     ChatRequest,
     ChatSessionCreate,
@@ -164,3 +165,20 @@ async def list_messages(
     """List message history for a chat session with pagination."""
     items, total = await service.list_messages(session_id, pagination)
     return PaginatedResponse.create(items, total, pagination)
+
+
+@chat_router.post(
+    "/messages/{message_id}/feedback",
+    response_model=ChatMessageResponse,
+)
+async def set_message_feedback(
+    message_id: uuid.UUID,
+    data: ChatMessageFeedbackUpdate,
+    service: ChatSessionService = Depends(get_service(ChatSessionService)),
+):
+    """Set thumbs-up/down feedback rating and optional note for a message."""
+    message = await service.set_message_feedback(
+        message_id, feedback=data.feedback, feedback_note=data.feedback_note
+    )
+    await service.uow.commit()
+    return message

@@ -65,6 +65,8 @@ class ChatMessage(TenantBaseModel):
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    feedback: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

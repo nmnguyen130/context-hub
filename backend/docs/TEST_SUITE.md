@@ -1,6 +1,6 @@
 # ContextHub Testing Guide
 
-This document details the configuration, execution, and architecture of the backend test suite, outlining database roles, multi-tenancy RLS isolation, and a full catalog of all 36 tests.
+This document details the configuration, execution, and architecture of the backend test suite, outlining database roles, multi-tenancy RLS isolation, and a full catalog of all 46 tests.
 
 ## Running Tests
 
@@ -40,7 +40,7 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
 
 ---
 
-## Test Catalog (36 Tests Total)
+## Test Catalog (46 Tests Total)
 
 ### Unit Tests (`tests/unit/`)
 
@@ -67,6 +67,15 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
   * `test_sse_event_framing_and_schemas`: Verifies SSEEvent framing JSON serialization and ChatRequest validation.
   * `test_semantic_cache_operations`: Verifies pgvector-backed `SemanticCache` get and set operations.
 
+* **test_critical_rag.py**
+  * `test_context_boost_rerank`: Verifies ContextBoostReranker metadata-driven re-scoring.
+  * `test_compute_token_budget`: Verifies complexity-adaptive token budget computation.
+  * `test_compress_context`: Verifies structural context compression & sentence extraction.
+  * `test_check_faithfulness`: Verifies groundedness evaluation & NLI assertion checking.
+  * `test_compute_composite_confidence`: Verifies composite confidence score calculation.
+  * `test_compress_context_boundary_sentence_extraction`: Verifies boundary sentence extraction logic.
+  * `test_compress_context_complexity_adaptive_budget`: Verifies adaptive compression under token constraints.
+
 * **test_celery_tasks.py**
   * `test_celery_task_registration`: Verifies Celery background task registration and name mapping (`app.worker.tasks.process_document_ingestion`).
   * `test_process_ingestion_task_execution`: Verifies document ingestion Celery task execution workflow with UnitOfWork scope.
@@ -86,6 +95,10 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
 * **test_document_services.py**
   * `test_workspace_service_lifecycle`: Verifies workspace creation, duplicate slug prevention (409), listing, and updates.
   * `test_document_service_lifecycle`: Verifies document file upload, SHA-256 content deduplication (409), listing, deletion, and 404 handling.
+  * `test_document_reingest_version_increment`: Verifies Level B re-ingestion storage key partitioning (`/v{version}/`), version increment, and soft chunk inactivation.
+
+* **test_chat_services.py**
+  * `test_message_feedback_update`: Verifies setting thumbs up/down rating (`feedback`) and feedback explanation note (`feedback_note`) on `ChatMessage`.
 
 * **test_pdf_rag_pipeline.py**
   * `test_pdf_rag_pipeline_real_cv`: Integration test verifying real CV PDF parsing, structural chunking, hybrid retrieval, and grounded citation synthesis.
@@ -93,6 +106,7 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
 * **test_search_queries.py**
   * `test_dense_search_query`: Verifies pgvector dense HNSW cosine similarity search score ranking and workspace filtering.
   * `test_sparse_search_query`: Verifies tsvector full-text search indexing, search vector updates, and keyword matching.
+  * `test_document_scope_filtering`: Verifies scoping dense and sparse search queries to specific `document_ids`.
 
 
 ### API Endpoint Tests (`tests/api/`)

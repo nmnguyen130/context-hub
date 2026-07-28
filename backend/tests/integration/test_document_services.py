@@ -132,3 +132,67 @@ async def test_document_service_lifecycle(uow, make_tenant_uow):
         with pytest.raises(ServiceError) as exc_info:
             await doc_service.get(document.id)
         assert exc_info.value.status_code == 404
+
+
+@pytest.mark.integration
+async def test_document_reingest_version_increment(uow, make_tenant_uow):
+    """Test re-ingesting a document updates file metadata and increments version under Level B storage path."""
+    tenant = make_tenant()
+    uow.session.add(tenant)
+    await uow.flush()
+
+    user = make_user(tenant_id=tenant.id)
+    workspace = Workspace(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Reingest Workspace",
+        slug="reingest-ws",
+    )
+    uow.session.add_all([user, workspace])
+    await uow.commit()
+
+    doc = Document(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        workspace_id=workspace.id,
+        filename="initial.txt",
+        mime_type="text/plain",
+        file_size=100,
+        content_hash="initial_hash",
+        storage_key=f"tenants/{tenant.id}/documents/initial.txt",
+        status=DocumentStatus.ACTIVE,
+        version=1,
+    )
+    uow.session.add(doc)
+    await uow.commit()
+
+    context = RequestContext(
+        request_id="test",
+        trace_id="test",
+        tenant_id=tenant.id,
+        user_id=user.id,
+        role=UserRole.MEMBER,
+    )
+    mock_storage = AsyncMock(spec=StorageProvider)
+    mock_storage.upload_file = AsyncMock()
+
+    async with make_tenant_uow(tenant.id, user.id) as tenant_uow:
+        service = DocumentService(uow=tenant_uow)
+        reingested = await service.reingest(
+            document_id=doc.id,
+            filename="updated.txt",
+            content=b"Updated content text for document",
+            content_type="text/plain",
+            storage=mock_storage,
+            context=context,
+        )
+        await tenant_uow.commit()
+
+        assert reingested.version == 2
+        assert reingested.filename == "updated.txt"
+        assert (
+            reingested.storage_key
+            == f"tenants/{tenant.id}/documents/{doc.id}/v2/updated.txt"
+        )
+        assert reingested.status == DocumentStatus.PENDING
+

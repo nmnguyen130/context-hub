@@ -82,6 +82,7 @@ class Document(TenantBaseModel, DomainEventsMixin):
     )
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -101,8 +102,9 @@ class DocumentChunk(TenantBaseModel):
     __table_args__ = (
         UniqueConstraint(
             "document_id",
+            "version",
             "chunk_index",
-            name="uq_document_chunks_index",
+            name="uq_document_chunks_version_index",
         ),
     )
 
@@ -116,6 +118,7 @@ class DocumentChunk(TenantBaseModel):
         index=True,
     )
     chunk_index: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1)
     content: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     embedding: Mapped[list[float] | None] = mapped_column(

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-
 from dataclasses import dataclass
 
 from app.core.clients import GeminiClient

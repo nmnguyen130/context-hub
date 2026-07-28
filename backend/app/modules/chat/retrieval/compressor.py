@@ -94,7 +94,9 @@ def compress_context(
         return []
 
     # Phase 1: Determine effective token budget
-    multiplier = COMPLEXITY_BUDGET_MULTIPLIER.get(complexity, 1.00) if complexity else 1.00
+    multiplier = (
+        COMPLEXITY_BUDGET_MULTIPLIER.get(complexity, 1.00) if complexity else 1.00
+    )
     effective_budget = max(1, int(max_tokens * multiplier))
 
     compressed: list[ScoredChunk] = []
@@ -126,7 +128,10 @@ def compress_context(
         # Case A: Whole chunk fits within current budget
         if current_tokens + chunk_tokens <= effective_budget:
             # Check redundancy against packed sentence history
-            if not any(is_sentence_redundant(st_set, threshold=0.85) for st_set in chunk_sentence_sets):
+            if not any(
+                is_sentence_redundant(st_set, threshold=0.85)
+                for st_set in chunk_sentence_sets
+            ):
                 compressed.append(chunk)
                 current_tokens += chunk_tokens
                 packed_sentence_sets.extend(chunk_sentence_sets)

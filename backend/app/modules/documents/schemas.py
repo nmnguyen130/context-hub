@@ -55,6 +55,7 @@ class DocumentResponse(BaseModel):
     mime_type: str
     file_size: int
     content_hash: str
+    version: int = 1
     status: DocumentStatus
     error_message: str | None
     created_at: datetime

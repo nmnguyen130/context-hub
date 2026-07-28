@@ -132,6 +132,34 @@ async def get_document(
     return await service.get(document_id)
 
 
+@documents_router.post(
+    "/{document_id}/reingest",
+    response_model=DocumentUploadResponse,
+)
+async def reingest_document(
+    document_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    context: RequestContext = Depends(get_authenticated_context),
+    service: DocumentService = Depends(get_service(DocumentService)),
+):
+    """Re-ingest an existing document with updated content, incrementing its version."""
+    content = await file.read()
+    document = await service.reingest(
+        document_id=document_id,
+        filename=file.filename or "reingest.bin",
+        content=content,
+        content_type=file.content_type,
+        storage=request.app.state.storage,
+        context=context,
+    )
+    await service.uow.commit()
+    return DocumentUploadResponse(
+        document=document,
+        message="Document updated and re-queued for processing.",
+    )
+
+
 @documents_router.delete(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,

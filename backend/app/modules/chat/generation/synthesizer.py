@@ -65,7 +65,9 @@ async def stream_synthesis(
 
     # 5. Emit done event
     completion_count = usage_info.completion_tokens or len(full_text_chunks)
-    total_count = usage_info.total_tokens or (usage_info.prompt_tokens + completion_count)
+    total_count = usage_info.total_tokens or (
+        usage_info.prompt_tokens + completion_count
+    )
     yield SSEEvent(
         type="done",
         data={

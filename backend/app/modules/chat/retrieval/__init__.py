@@ -29,6 +29,7 @@ async def retrieve_context(
     session: AsyncSession,
     reranker: Reranker | None = None,
     original_query: str | None = None,
+    document_ids: list[uuid.UUID] | None = None,
 ) -> RetrievalResult:
     """Execute hybrid dense + sparse retrieval, RRF fusion, reranking, and CRAG relevance grading."""
     reranker = reranker or Reranker()
@@ -43,6 +44,7 @@ async def retrieve_context(
             embedding=embedding,
             workspace_ids=workspace_ids,
             tenant_id=tenant_id,
+            document_ids=document_ids,
             limit=50,
         )
         for embedding in query_plan.embeddings
@@ -53,6 +55,7 @@ async def retrieve_context(
             query=query,
             workspace_ids=workspace_ids,
             tenant_id=tenant_id,
+            document_ids=document_ids,
             limit=50,
         )
         for query in query_plan.queries

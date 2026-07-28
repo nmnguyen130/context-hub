@@ -135,6 +135,26 @@ class ChatSessionService:
         ).all()
         return list(items), total
 
+    async def set_message_feedback(
+        self,
+        message_id: uuid.UUID,
+        feedback: str,
+        feedback_note: str | None = None,
+    ) -> ChatMessage:
+        """Set user feedback rating (up/down) and optional note for a message."""
+        ctx = try_current_context()
+        message = await self.uow.session.get(ChatMessage, message_id)
+        if message is None:
+            raise ServiceError("Message not found", status_code=404)
+
+        if ctx and ctx.tenant_id and message.tenant_id != ctx.tenant_id:
+            raise ServiceError("Message not found", status_code=404)
+
+        message.feedback = feedback
+        message.feedback_note = feedback_note
+        await self.uow.flush()
+        return message
+
     async def auto_title(
         self,
         session_id: uuid.UUID,
