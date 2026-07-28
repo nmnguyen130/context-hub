@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from app.modules.chat.text_utils import tokenize as _tokenize
+from app.modules.chat.text_utils import tokenize
 from app.modules.documents.schemas import ScoredChunk
 
 
@@ -26,12 +26,12 @@ def check_faithfulness(
     if not sentences:
         return 1.0, []
 
-    chunk_word_sets = [_tokenize(chunk.content) for chunk in chunks]
+    chunk_word_sets = [tokenize(chunk.content) for chunk in chunks]
     sentence_results = []
     grounded_score_sum = 0.0
 
     for sentence in sentences:
-        sentence_words = _tokenize(sentence)
+        sentence_words = tokenize(sentence)
         if not sentence_words:
             grounded_score_sum += 1.0
             sentence_results.append(

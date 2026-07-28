@@ -82,9 +82,10 @@ class ChatService:
                     tenant_id=context.tenant_id,
                 )
                 if cached:
-                    yield SSEEvent(type="sources", data=cached.get("citations", []))
+                    citations = cached.get("citations", [])
+                    if citations:
+                        yield SSEEvent(type="citations", data=citations)
                     yield SSEEvent(type="token", data={"text": cached["content"]})
-                    yield SSEEvent(type="citations", data=cached.get("citations", []))
                     yield SSEEvent(
                         type="done",
                         data={
@@ -94,6 +95,8 @@ class ChatService:
                         },
                     )
 
+                    prompt_tokens = len(request.message.split())
+                    completion_tokens = len(cached["content"].split())
                     await self._persist_messages(
                         session=session,
                         user_query=request.message,
@@ -101,6 +104,8 @@ class ChatService:
                         citations=cached.get("citations", []),
                         retrieved_chunk_ids=[],
                         context=context,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
                     )
                     await self.uow.commit()
                     return
@@ -202,9 +207,8 @@ class ChatService:
         )
 
         # 8. Save session history
-        session = await self.session_service.get(session_id)
         retrieved_chunk_ids = [str(c.id) for c in retrieval.chunks]
-        await self._persist_messages(
+        user_msg, asst_msg = await self._persist_messages(
             session=session,
             user_query=request.message,
             assistant_response=full_text,
@@ -223,16 +227,10 @@ class ChatService:
                 session.id, request.message, client=self.gemini_client
             )
 
-        # Update running summary periodically
+        # Update running summary periodically using current turn messages
         if session.message_count % settings.RAG_MEMORY_WINDOW == 0:
-            updated_messages = await get_recent_messages(
-                session=self.uow.session,
-                session_id=session.id,
-                tenant_id=context.tenant_id,
-                limit=settings.RAG_MEMORY_WINDOW,
-            )
             await self.session_service.update_summary(
-                session.id, updated_messages, client=self.gemini_client
+                session.id, [user_msg, asst_msg], client=self.gemini_client
             )
 
         await self.uow.commit()
@@ -256,14 +254,12 @@ class ChatService:
         self, request: ChatRequest, context: RequestContext
     ) -> ChatSession:
         """Resolve session by ID or create a new session if not supplied."""
+        if request.session_id:
+            return await self.session_service.get(request.session_id, require_owner=True)
+
         workspace = await self.uow.session.get(Workspace, request.workspace_id)
         if workspace is None or workspace.tenant_id != context.tenant_id:
             raise ServiceError("Workspace not found", status_code=404)
-
-        if request.session_id:
-            return await self.session_service.get(
-                request.session_id, require_owner=True
-            )
 
         create_data = ChatSessionCreate(
             workspace_id=request.workspace_id,
@@ -279,22 +275,19 @@ class ChatService:
         citations: list[dict[str, Any]],
         retrieved_chunk_ids: list[str],
         context: RequestContext,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
+        prompt_tokens: int,
+        completion_tokens: int,
         cost_usd: float = 0.0,
         confidence_score: float | None = None,
-    ) -> None:
+    ) -> tuple[ChatMessage, ChatMessage]:
         """Save user query and assistant response messages to the database and update session statistics."""
-        user_tokens = prompt_tokens or len(user_query.split())
-        asst_tokens = completion_tokens or len(assistant_response.split())
-
         user_msg = ChatMessage(
             id=uuid.uuid4(),
             tenant_id=context.tenant_id,
             session_id=session.id,
             role="user",
             content=user_query,
-            token_count=user_tokens,
+            token_count=prompt_tokens,
         )
 
         asst_msg = ChatMessage(
@@ -305,7 +298,7 @@ class ChatService:
             content=assistant_response,
             citations=citations,
             retrieved_chunks=retrieved_chunk_ids,
-            token_count=asst_tokens,
+            token_count=completion_tokens,
             cost_usd=cost_usd,
             confidence_score=confidence_score,
         )
@@ -314,6 +307,7 @@ class ChatService:
         self.uow.session.add(asst_msg)
 
         session.message_count += 2
-        session.total_tokens += user_tokens + asst_tokens
+        session.total_tokens += prompt_tokens + completion_tokens
         session.total_cost_usd += cost_usd
         await self.uow.flush()
+        return user_msg, asst_msg

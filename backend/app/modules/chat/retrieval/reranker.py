@@ -2,7 +2,7 @@ import logging
 from dataclasses import replace
 
 from app.core.clients import CohereClient
-from app.modules.chat.text_utils import tokenize as _tokenize
+from app.modules.chat.text_utils import tokenize
 from app.modules.documents.schemas import ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -13,13 +13,13 @@ def context_boost_rerank(query: str, chunks: list[ScoredChunk]) -> list[ScoredCh
     if not chunks:
         return []
 
-    query_tokens = _tokenize(query)
+    query_tokens = tokenize(query)
     if not query_tokens:
         return chunks
 
     boosted = []
     for chunk in chunks:
-        content_tokens = _tokenize(chunk.content)
+        content_tokens = tokenize(chunk.content)
         intersection = query_tokens & content_tokens
         union = query_tokens | content_tokens
         jaccard = len(intersection) / max(len(union), 1)
@@ -34,10 +34,10 @@ def context_boost_rerank(query: str, chunks: list[ScoredChunk]) -> list[ScoredCh
             if isinstance(headers, list | tuple)
             else str(headers)
         )
-        heading_bonus = 0.15 if query_tokens & _tokenize(headers_text) else 0.0
+        heading_bonus = 0.15 if query_tokens & tokenize(headers_text) else 0.0
 
         doc_name = str(chunk.metadata.get("document_name", ""))
-        filename_bonus = 0.10 if query_tokens & _tokenize(doc_name) else 0.0
+        filename_bonus = 0.10 if query_tokens & tokenize(doc_name) else 0.0
 
         base_score = chunk.rrf_score if chunk.rrf_score > 0 else chunk.cosine_score
         score = base_score + (jaccard * 0.35) + heading_bonus + filename_bonus

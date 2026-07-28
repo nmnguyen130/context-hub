@@ -92,9 +92,5 @@ async def prepare_queries(
 __all__ = [
     "QueryComplexity",
     "QueryPlan",
-    "classify_query",
-    "rewrite_query",
-    "expand_query",
-    "generate_hyde_embedding",
     "prepare_queries",
 ]
