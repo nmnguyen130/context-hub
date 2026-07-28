@@ -53,9 +53,3 @@ class TenantBaseModel(Base):
         index=True,
         nullable=False,
     )
-
-
-async def get_session():
-    """FastAPI dependency yielding a raw database session lifecycle."""
-    async with app_session() as session:
-        yield session

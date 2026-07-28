@@ -38,14 +38,8 @@ def grade_relevance(
         else:
             rejected.append(chunk)
 
-    if not accepted:
-        # Fallback: if no chunk meets threshold, take top 1
-        accepted = [chunks[0]]
-        rejected = chunks[1:]
-
     scores = [c.rerank_score if c.rerank_score > 0 else c.rrf_score for c in accepted]
     avg_conf = mean(scores) if scores else 0.0
-
     is_low = avg_conf < threshold or len(accepted) == 0
 
     return GradingResult(

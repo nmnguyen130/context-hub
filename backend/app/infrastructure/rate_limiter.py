@@ -68,20 +68,22 @@ class PlanPolicyProvider(LimitPolicyProvider):
         self,
         default_requests: int = 60,
         default_window: int = 60,
+        key_prefix: str = "api",
+        custom_plan_limits: dict[str, int] | None = None,
     ):
         self.default_requests = default_requests
         self.default_window = default_window
+        self.key_prefix = key_prefix
+        self.custom_plan_limits = custom_plan_limits or {"enterprise": 2000, "pro": 500}
 
     def get_policy(self, request: Request) -> RateLimitPolicy:
         """Resolves policy by evaluating subscription tier."""
         ctx = try_current_context()
-        plan = ctx.plan if ctx else "free"
-        requests = {"enterprise": 2000, "pro": 500}.get(
-            plan.lower(), self.default_requests
-        )
+        plan = (ctx.plan if ctx else "free").lower()
+        requests = self.custom_plan_limits.get(plan, self.default_requests)
 
         return RateLimitPolicy(
-            key_prefix="api",
+            key_prefix=self.key_prefix,
             requests=requests,
             window_seconds=self.default_window,
         )

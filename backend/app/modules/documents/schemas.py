@@ -18,7 +18,6 @@ class ScoredChunk:
     cosine_score: float = 0.0
     fts_score: float = 0.0
     rrf_score: float = 0.0
-    boost_score: float = 0.0
     rerank_score: float = 0.0
 
 

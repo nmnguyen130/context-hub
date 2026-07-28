@@ -28,6 +28,9 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
 class SemanticCache:
     """pgvector-backed semantic cache matching user queries by embedding similarity."""
 
+    def __init__(self, threshold: float | None = None) -> None:
+        self.default_threshold = threshold
+
     async def get(
         self,
         session: AsyncSession,
@@ -40,7 +43,7 @@ class SemanticCache:
         if not settings.ENABLE_SEMANTIC_CACHE:
             return None
 
-        threshold = threshold or settings.SEMANTIC_CACHE_THRESHOLD
+        threshold = threshold or self.default_threshold or settings.SEMANTIC_CACHE_THRESHOLD
         max_distance = 1.0 - threshold
         now = datetime.now(UTC)
 

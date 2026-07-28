@@ -17,6 +17,7 @@ def build_grounded_prompt(
     query: str,
     chunks: list[ScoredChunk],
     running_summary: str | None = None,
+    history: list[str] | None = None,
 ) -> tuple[str, str]:
     """Build system instructions and user prompt containing context chunks with marker numbers [^1], [^2].
 
@@ -42,8 +43,15 @@ def build_grounded_prompt(
         f"## Conversation Summary\n{running_summary}\n\n" if running_summary else ""
     )
 
+    history_block = (
+        f"## Recent Conversation History\n" + "\n".join(history) + "\n\n"
+        if history
+        else ""
+    )
+
     user_prompt = (
         f"{summary_block}"
+        f"{history_block}"
         f"## Context Documents\n"
         f"{formatted_context}\n\n"
         f"---\n\n"

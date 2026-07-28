@@ -54,9 +54,10 @@ class WorkspaceService:
         return workspace
 
     async def list(
-        self, pagination: PaginationParams = PaginationParams()
+        self, pagination: PaginationParams | None = None
     ) -> tuple[list[Workspace], int]:
         """List workspaces for the current tenant with pagination."""
+        pagination = pagination or PaginationParams()
         ctx = try_current_context()
         if not ctx or not ctx.tenant_id:
             raise ServiceError("Tenant context required", status_code=400)
@@ -178,9 +179,10 @@ class DocumentService:
     async def list_by_workspace(
         self,
         workspace_id: uuid.UUID,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
     ) -> tuple[list[Document], int]:
         """List documents belonging to a workspace with pagination."""
+        pagination = pagination or PaginationParams()
         ctx = try_current_context()
         if not ctx or not ctx.tenant_id:
             raise ServiceError("Tenant context required", status_code=400)

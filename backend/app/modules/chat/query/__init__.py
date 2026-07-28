@@ -1,4 +1,7 @@
-from dataclasses import dataclass, field
+import asyncio
+import logging
+
+from dataclasses import dataclass
 
 from app.core.clients import GeminiClient
 from app.modules.chat.query.classifier import QueryComplexity, classify_query
@@ -6,6 +9,8 @@ from app.modules.chat.query.expander import expand_query
 from app.modules.chat.query.hyde import generate_hyde_embedding
 from app.modules.chat.query.rewriter import rewrite_query
 from app.modules.documents.embeddings import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -51,26 +56,31 @@ async def prepare_queries(
             rewritten_query=rewritten,
         )
 
-    # COMPLEX query: rewrite + multi-query expansion + HyDE
+    # COMPLEX query: rewrite first, then parallel expand_query + HyDE embedding
     rewritten = await rewrite_query(query, history, client=client)
-    expanded = await expand_query(rewritten, client=client, count=3)
 
-    # Combine rewritten and expanded queries (deduplicated)
+    async def _safe_hyde() -> list[float] | None:
+        try:
+            return await generate_hyde_embedding(
+                rewritten, client=client, embedder=embedder
+            )
+        except Exception as exc:
+            logger.warning("HyDE embedding generation failed: %s", exc)
+            return None
+
+    expanded_res, hyde_emb = await asyncio.gather(
+        expand_query(rewritten, client=client, count=3),
+        _safe_hyde(),
+    )
+
     all_queries: list[str] = []
-    for q in [rewritten] + expanded:
+    for q in [rewritten] + expanded_res:
         if q not in all_queries:
             all_queries.append(q)
 
     embeddings = await embedder.embed_texts(all_queries)
-
-    # HyDE embedding generation
-    try:
-        hyde_emb = await generate_hyde_embedding(
-            rewritten, client=client, embedder=embedder
-        )
+    if hyde_emb:
         embeddings.append(hyde_emb)
-    except Exception:
-        pass  # Non-fatal if HyDE fails
 
     return QueryPlan(
         queries=all_queries,

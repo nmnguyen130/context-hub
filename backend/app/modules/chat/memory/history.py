@@ -12,17 +12,27 @@ async def get_recent_messages(
     tenant_id: uuid.UUID | None = None,
     limit: int = 6,
 ) -> list[ChatMessage]:
-    """Fetch the most recent `limit` messages for a chat session in chronological order."""
+    """Fetch recent messages for a chat session in chronological order."""
     stmt = select(ChatMessage).where(ChatMessage.session_id == session_id)
     if tenant_id is not None:
         stmt = stmt.where(ChatMessage.tenant_id == tenant_id)
 
     stmt = stmt.order_by(ChatMessage.created_at.desc()).limit(limit)
     res = await session.scalars(stmt)
-    # Reverse so returned list is chronological (oldest to newest)
     return list(reversed(res.all()))
 
 
-def format_history_for_prompt(messages: list[ChatMessage]) -> list[str]:
-    """Format messages into a list of strings 'role: content' for LLM query rewriting."""
-    return [f"{msg.role}: {msg.content}" for msg in messages]
+def format_history_for_prompt(
+    messages: list[ChatMessage],
+    max_words: int = 100,
+) -> list[str]:
+    """Format messages, keeping past assistant responses concise by word boundary."""
+    formatted = []
+    for msg in messages:
+        words = msg.content.split()
+        if msg.role == "assistant" and len(words) > max_words:
+            content = " ".join(words[:max_words])
+        else:
+            content = msg.content
+        formatted.append(f"{msg.role}: {content}")
+    return formatted

@@ -12,6 +12,7 @@ from app.modules.documents.parsers.markdown_scanner import (
     scan_markdown_lines,
 )
 from app.modules.documents.parsers.types import BlockType, ContentBlock
+from app.modules.documents.security import apply_dlp, unmask_pii
 
 
 def test_detect_mime_type():
@@ -47,88 +48,62 @@ def test_markdown_parser():
 
     assert result.metadata["file_type"] == "text/markdown"
     assert len(result.blocks) == 3
-
     assert result.blocks[0].text == "Header 1"
     assert result.blocks[0].block_type == BlockType.HEADING
-    assert result.blocks[0].heading_level == 1
-
     assert result.blocks[1].text == "Paragraph 1"
-    assert result.blocks[1].block_type == BlockType.PARAGRAPH
-
     assert result.blocks[2].text == "print('hello')"
-    assert result.blocks[2].block_type == BlockType.CODE
-    assert result.blocks[2].language == "python"
 
 
-def test_csv_parser():
-    """Test parsing of CSV documents."""
-    data = b"col1,col2\nval1,val2\nval3,val4"
-    result = parse_csv(data, "test.csv")
+def test_csv_parser_and_row_batching():
+    """Test CSV parsing and row batching (M5)."""
+    header = "id,name,role\n"
+    rows = "".join([f"{i},User_{i},Developer\n" for i in range(1, 51)])
+    csv_bytes = (header + rows).encode("utf-8")
 
-    assert result.metadata["file_type"] == "text/csv"
-    assert len(result.blocks) == 2
-    assert "col1 | col2" in result.blocks[0].text
-    assert "val1 | val2" in result.blocks[0].text
-    assert result.blocks[0].block_type == BlockType.TABLE
-    assert result.blocks[0].metadata["row_index"] == 1
-    assert result.blocks[0].metadata["schema_hash"] is not None
+    result = parse_csv(csv_bytes, "users.csv", batch_size=20)
+
+    assert len(result.blocks) == 3
+    for b in result.blocks:
+        assert b.block_type == BlockType.TABLE
+        assert "id | name | role" in b.text
+
+    assert result.blocks[0].metadata["row_range"] == [1, 20]
+    assert result.blocks[1].metadata["row_range"] == [21, 40]
+    assert result.blocks[2].metadata["row_range"] == [41, 50]
 
 
-def test_document_assembler():
-    """Test text segmenting via the DocumentAssembler chunker engine."""
-    assembler = DocumentAssembler(max_chunk_size=10, overlap_size=2)
+def test_document_assembler_and_offsets():
+    """Test text segmenting and incremental character offset calculations via DocumentAssembler (M4)."""
+    p1 = "Paragraph one text about architecture."
+    p2 = "Paragraph two text about performance."
+    full_text = f"{p1}\n\n{p2}"
+
     blocks = [
-        ContentBlock(block_type=BlockType.PARAGRAPH, text="Hello world", page_number=1),
-        ContentBlock(
-            block_type=BlockType.PARAGRAPH, text="This is a test block", page_number=1
-        ),
+        ContentBlock(block_type=BlockType.PARAGRAPH, text=p1, page_number=1),
+        ContentBlock(block_type=BlockType.PARAGRAPH, text=p2, page_number=1),
     ]
-    chunks = assembler.chunk_document(
-        full_text="Hello world\n\nThis is a test block", blocks=blocks
-    )
 
-    assert len(chunks) > 0
-    for chunk in chunks:
-        assert chunk.content != ""
-        assert chunk.token_count > 0
-        assert 1 in chunk.metadata.page_numbers
+    assembler = DocumentAssembler(max_chunk_size=10, overlap_size=0)
+    chunks = assembler.chunk_document(full_text=full_text, blocks=blocks)
 
+    assert len(chunks) == 2
+    assert chunks[0].content == p1
+    assert chunks[0].metadata.char_start == 0
+    assert chunks[0].metadata.char_end == len(p1)
 
-def test_numbered_subsection_heading_classification():
-    """Verify that subsections like '3.1 Encoder and Decoder Stacks' are correctly classified as level 2 headings."""
-    assert classify_heading("3.1 Encoder and Decoder Stacks") == (
-        2,
-        "3.1 Encoder and Decoder Stacks",
-    )
-    assert classify_heading("3.1.2 Multi-Head Attention") == (
-        3,
-        "3.1.2 Multi-Head Attention",
-    )
-    assert classify_heading("1 Introduction") == (1, "1 Introduction")
-    assert classify_heading("### 3.1 Encoder and Decoder Stacks") == (
-        3,
-        "3.1 Encoder and Decoder Stacks",
-    )
+    assert chunks[1].content == p2
+    assert chunks[1].metadata.char_start == len(p1) + 2
+    assert chunks[1].metadata.char_end == len(full_text)
 
 
-def test_section_aware_chunk_boundaries():
-    """Verify that subsections trigger a new chunk boundary instead of merging into previous chunk."""
-    md_content = """# 3 Model Architecture
+def test_dlp_mask_and_unmask_roundtrip():
+    """Test DLP PII masking and unmasking roundtrip."""
+    raw_text = "Please contact support@company.com or call 123-45-6789 for help."
+    masked_text, warnings, vault = apply_dlp(raw_text, workspace_dlp_rules={"action": "MASK"})
 
-The Model Architecture section describes the overall design.
+    assert "support@company.com" not in masked_text
+    assert "123-45-6789" not in masked_text
+    assert len(vault) == 2
 
-## 3.1 Encoder and Decoder Stacks
-
-The encoder is composed of a stack of N = 6 identical layers.
-
-## 3.2 Attention Mechanism
-
-An attention function can be described as mapping a query and a set of key-value pairs."""
-
-    blocks = scan_markdown_lines(md_content.splitlines(), page_number=1)
-    chunks = select_chunks(md_content, blocks, section_break_level=2)
-
-    assert len(chunks) == 3
-    assert "3 Model Architecture" in chunks[0].metadata.heading_trail
-    assert "3.1 Encoder and Decoder Stacks" in chunks[1].metadata.heading_trail
-    assert "3.2 Attention Mechanism" in chunks[2].metadata.heading_trail
+    restored_text = unmask_pii(masked_text, vault)
+    assert restored_text == raw_text

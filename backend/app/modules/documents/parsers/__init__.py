@@ -47,35 +47,38 @@ def parse_plaintext(data: bytes, filename: str) -> ParseResult:
     )
 
 
-def parse_csv(data: bytes, filename: str) -> ParseResult:
-    """Parse CSV raw bytes into structured table blocks and plain text."""
+def parse_csv(data: bytes, filename: str, batch_size: int = 25) -> ParseResult:
+    """Parse CSV raw bytes into grouped table blocks and full text."""
     text = data.decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = reader.fieldnames or []
     schema_hash = hashlib.sha256(",".join(fieldnames).encode()).hexdigest()[:16]
 
-    blocks: list[ContentBlock] = []
-    lines: list[str] = []
     header = " | ".join(fieldnames)
     separator = " | ".join("---" for _ in fieldnames)
-    lines.append(header)
 
-    for row_index, row in enumerate(reader, start=1):
-        row_text = " | ".join(str(row.get(col, "")) for col in fieldnames)
-        lines.append(row_text)
+    row_lines = [
+        " | ".join(str(row.get(col, "")) for col in fieldnames)
+        for row in reader
+    ]
+
+    blocks: list[ContentBlock] = []
+    for i in range(0, len(row_lines), batch_size):
+        batch = row_lines[i : i + batch_size]
+        table_text = f"{header}\n{separator}\n" + "\n".join(batch)
         blocks.append(
             ContentBlock(
                 block_type=BlockType.TABLE,
-                text=f"{header}\n{separator}\n{row_text}",
+                text=table_text,
                 metadata={
                     "column_names": fieldnames,
-                    "row_index": row_index,
+                    "row_range": [i + 1, i + len(batch)],
                     "schema_hash": schema_hash,
                 },
             )
         )
 
-    full_text = unicodedata.normalize("NFC", "\n".join(lines))
+    full_text = unicodedata.normalize("NFC", "\n".join([header] + row_lines))
     return ParseResult(
         blocks=blocks,
         full_text=full_text,

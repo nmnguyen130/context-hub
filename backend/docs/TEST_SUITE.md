@@ -1,10 +1,10 @@
 # ContextHub Testing Guide
 
-This document details the configuration and execution of the backend test suite, outlining the database roles, multi-tenancy testing isolation, and a catalog of all tests.
+This document details the configuration, execution, and architecture of the backend test suite, outlining database roles, multi-tenancy RLS isolation, and a full catalog of all 36 tests.
 
 ## Running Tests
 
-All tests run inside the `api` container:
+All tests run inside the `api` container from the `backend/` directory:
 
 ```bash
 # Run all tests
@@ -20,7 +20,7 @@ docker compose exec api pytest tests/api
 
 To enforce Row-Level Security (RLS) in tests, the test environment separates the migration owner role from the application query connection:
 
-* **Superuser / Owner (postgres)**: Alembic migrations run in a subprocess under this superuser role via the `DATABASE_OWNER_URL` environment override to create tables and RLS policies on `contexthub_test`.
+* **Superuser / Owner (postgres)**: Alembic migrations run in a subprocess under this superuser role via the `DATABASE_OWNER_URL` environment override to create tables, pgvector vector columns, HNSW indexes, tsvector FTS indexes, and RLS policies on `contexthub_test`.
 * **Application / Test Client (contexthub_app)**: The pytest engine executes test queries under this non-superuser role via `DATABASE_URL` to query `contexthub_test` with active RLS enforcement.
 
 ## Session and Transaction Isolation
@@ -38,9 +38,11 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
 * `uow`: Admin-mode Unit of Work to set up test fixtures.
 * `async_client`: FastAPI HTTPX AsyncClient with overridden database session pointing to `contexthub_test`.
 
-## Test Catalog
+---
 
-### Unit Tests (tests/unit/)
+## Test Catalog (36 Tests Total)
+
+### Unit Tests (`tests/unit/`)
 
 * **test_security_context.py**
   * `test_bcrypt_password_hashing`: Verifies password hashing, matching verification, and failure cases.
@@ -52,26 +54,25 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
   * `test_detect_mime_type`: Verifies automatic detection of MIME types from filename extensions and fallbacks.
   * `test_plaintext_parser`: Verifies line-by-line parsing of raw text files into structured prose blocks.
   * `test_markdown_parser`: Verifies header, prose, and fenced code block extraction with metadata.
-  * `test_csv_parser`: Verifies table schema extraction, row formatting, and schema hashing.
-  * `test_document_assembler`: Verifies unified structural chunking, lineage header injection, table preservation, and formula block handling.
-  * `test_numbered_subsection_heading_classification`: Verifies regex classification of numbered headings (e.g. 3.1, 3.1.2) vs formulas.
-  * `test_section_aware_chunk_boundaries`: Verifies clean section flushes without cross-section tail overlap contamination.
+  * `test_csv_parser_and_row_batching`: Verifies CSV row batching into table blocks with `row_range` metadata and header preservation (M5).
+  * `test_document_assembler_and_offsets`: Verifies unified structural chunking and incremental character offset calculations (`char_start`, `char_end`) (M4).
+  * `test_dlp_mask_and_unmask_roundtrip`: Verifies DLP PII pattern scanning, token masking (`[PII_EMAIL_hash]`), and token unmasking roundtrip (M6).
 
 * **test_chat_module.py**
-  * `test_query_classifier`: Verifies query classification heuristics (SIMPLE vs COMPLEX).
+  * `test_query_classifier`: Verifies query complexity classification heuristics (SIMPLE vs MODERATE vs COMPLEX).
   * `test_reciprocal_rank_fusion`: Verifies Reciprocal Rank Fusion (RRF) score merging across dense and sparse ranks.
-  * `test_relevance_grader`: Verifies Corrective RAG (CRAG) relevance scoring and filtering.
-  * `test_citation_extraction`: Verifies strict inline citation extraction `[^[id]]` and metadata attachment.
-  * `test_prompt_building`: Verifies grounded synthesis prompt construction with retrieved context lineage.
-  * `test_cosine_similarity`: Verifies vector similarity math calculations.
-  * `test_semantic_cache_operations`: Verifies Redis semantic query caching operations.
-  * `test_schemas_validation`: Verifies chat request and response schema serialization.
+  * `test_relevance_grader_and_empty_fallback`: Verifies Corrective RAG (CRAG) relevance scoring, thresholding, and clean empty fallback with `is_low_confidence=True` (M3).
+  * `test_citation_extraction`: Verifies strict inline citation extraction `[^1]`, `[^2]` and metadata attachment.
+  * `test_prompt_building_and_history`: Verifies grounded synthesis prompt construction with recent conversation history block injection (L5).
+  * `test_sse_event_framing_and_schemas`: Verifies SSEEvent framing JSON serialization and ChatRequest validation.
+  * `test_semantic_cache_operations`: Verifies pgvector-backed `SemanticCache` get and set operations.
 
-* **test_pdf_rag_pipeline.py**
-  * `test_pdf_end_to_end_rag_pipeline`: Integration test verifying full PDF parsing, DLP scan, structural chunking, hybrid retrieval, and grounded citation synthesis.
+* **test_celery_tasks.py**
+  * `test_celery_task_registration`: Verifies Celery background task registration and name mapping (`app.worker.tasks.process_document_ingestion`).
+  * `test_process_ingestion_task_execution`: Verifies document ingestion Celery task execution workflow with UnitOfWork scope.
 
 
-### Integration Tests (tests/integration/)
+### Integration Tests (`tests/integration/`)
 
 * **test_rls_isolation.py**
   * `test_rls_select_isolation`: Verifies that a tenant-scoped session cannot query or fetch rows belonging to other tenants.
@@ -86,19 +87,23 @@ We use SQLAlchemy connection pooling. To prevent connection states (like `app.by
   * `test_workspace_service_lifecycle`: Verifies workspace creation, duplicate slug prevention (409), listing, and updates.
   * `test_document_service_lifecycle`: Verifies document file upload, SHA-256 content deduplication (409), listing, deletion, and 404 handling.
 
+* **test_pdf_rag_pipeline.py**
+  * `test_pdf_rag_pipeline_real_cv`: Integration test verifying real CV PDF parsing, structural chunking, hybrid retrieval, and grounded citation synthesis.
+
 * **test_search_queries.py**
   * `test_dense_search_query`: Verifies pgvector dense HNSW cosine similarity search score ranking and workspace filtering.
   * `test_sparse_search_query`: Verifies tsvector full-text search indexing, search vector updates, and keyword matching.
 
-### API Endpoint Tests (tests/api/)
+
+### API Endpoint Tests (`tests/api/`)
 
 * **test_auth.py**
-  * `test_register_new_tenant_and_admin`: Tests new tenant/admin registration endpoint (`POST /auth/register`).
-  * `test_login_returns_jwt_tokens`: Tests authentication login endpoint (`POST /auth/login`).
+  * `test_register_new_tenant_and_admin`: Tests new tenant/admin registration endpoint (`POST /api/v1/auth/register`).
+  * `test_login_returns_jwt_tokens`: Tests authentication login endpoint (`POST /api/v1/auth/login`).
 
 * **test_tenant_users.py**
-  * `test_get_current_tenant_details`: Tests tenant retrieval endpoint (`GET /tenant`).
-  * `test_patch_tenant_admin_only`: Tests tenant settings update (`PATCH /tenant`) is restricted to admins.
+  * `test_get_current_tenant_details`: Tests tenant retrieval endpoint (`GET /api/v1/tenant`).
+  * `test_patch_tenant_admin_only`: Tests tenant settings update (`PATCH /api/v1/tenant`) is restricted to admins.
   * `test_role_update_rejected_for_members`: Tests that member role modification is rejected.
   * `test_api_tenant_isolation_list`: Tests that listing users returns only current tenant members.
   * `test_api_tenant_isolation_update`: Tests that updating a user from another tenant returns a 404 error due to RLS isolation.

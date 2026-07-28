@@ -41,10 +41,11 @@ class UserService:
     async def list_users(
         self,
         tenant_id: UUID,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
         is_active: bool | None = None,
     ) -> tuple[list[User], int]:
         """List users belonging to a tenant organization with pagination."""
+        pagination = pagination or PaginationParams()
         stmt = select(User).where(User.tenant_id == tenant_id)
         if is_active is not None:
             stmt = stmt.where(User.is_active == is_active)

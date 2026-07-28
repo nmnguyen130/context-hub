@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # AI Providers
     GEMINI_API_KEY: str | None = None
     COHERE_API_KEY: str | None = None
+    COHERE_RERANK_MODEL: str = "rerank-v3.5"
 
     # RAG
     RAG_EMBEDDING_MODEL: str = "gemini-embedding-001"
@@ -104,6 +105,12 @@ class Settings(BaseSettings):
                 raise ValueError("JWT_SECRET must have at least 32 characters")
 
         return self
+
+    @property
+    def parsed_cors_origins(self) -> list[str]:
+        if self.ALLOWED_ORIGINS == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
 
 @lru_cache

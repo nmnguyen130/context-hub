@@ -16,8 +16,12 @@ class DocumentAssembler:
         overlap_size: int | None = None,
         section_break_level: int = 3,
     ) -> None:
-        self.max_chunk_size = max_chunk_size or settings.RAG_CHUNK_SIZE
-        self.overlap_size = overlap_size or settings.RAG_CHUNK_OVERLAP
+        self.max_chunk_size = (
+            settings.RAG_CHUNK_SIZE if max_chunk_size is None else max_chunk_size
+        )
+        self.overlap_size = (
+            settings.RAG_CHUNK_OVERLAP if overlap_size is None else overlap_size
+        )
         self.section_break_level = section_break_level
 
     def chunk_document(
@@ -71,13 +75,10 @@ class DocumentAssembler:
             token_count = estimate_tokens(chunk_text)
             pages = tuple(sorted(buffered_pages)) if buffered_pages else (1,)
 
-            # Calculate exact character offsets using running search offset
+            # Calculate character offsets incrementally from full_text or search_offset
             first_block_text = buffered_blocks[0].text
-            char_start = (
-                full_text.find(first_block_text, search_offset) if full_text else 0
-            )
-            if char_start < 0:
-                char_start = search_offset
+            pos = full_text.find(first_block_text, search_offset) if full_text else -1
+            char_start = pos if pos >= 0 else search_offset
             char_end = char_start + len(chunk_text)
             search_offset = char_end
 
@@ -318,6 +319,8 @@ class DocumentAssembler:
                         metadata=ChunkMetadata(
                             page_numbers=(page_number,),
                             heading_trail=heading_trail,
+                            char_start=0,
+                            char_end=len(formatted),
                             content_type=raw_type,
                             language=block.language,
                             extra=block.metadata,
@@ -339,6 +342,8 @@ class DocumentAssembler:
                     metadata=ChunkMetadata(
                         page_numbers=(page_number,),
                         heading_trail=heading_trail,
+                        char_start=0,
+                        char_end=len(formatted),
                         content_type=raw_type,
                         language=block.language,
                         extra=block.metadata,

@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.modules.chat.query import QueryPlan
+from app.modules.chat.query import QueryComplexity, QueryPlan
+from app.modules.chat.retrieval.compressor import compress_context
 from app.modules.chat.retrieval.fusion import reciprocal_rank_fusion
 from app.modules.chat.retrieval.grader import GradingResult, grade_relevance
 from app.modules.chat.retrieval.reranker import Reranker
@@ -71,12 +72,14 @@ async def retrieve_context(
     # 2. Reciprocal Rank Fusion (RRF)
     fused_chunks = reciprocal_rank_fusion(result_sets, k=settings.RAG_RRF_K)
 
-    # 3. Reranking
+    # 3. Reranking - Cohere API reserved for COMPLEX queries, ContextBoost for SIMPLE/MODERATE
+    use_cohere = query_plan.complexity == QueryComplexity.COMPLEX
     top_candidates = fused_chunks[: settings.RAG_FINAL_TOP_K * 3]
     reranked_chunks = await reranker.rerank(
         query=original_query,
         chunks=top_candidates,
         top_n=settings.RAG_FINAL_TOP_K * 2,
+        use_cohere=use_cohere,
     )
 
     # 4. Relevance grading (CRAG)
@@ -84,7 +87,12 @@ async def retrieve_context(
         reranked_chunks, threshold=settings.RAG_RELEVANCE_THRESHOLD
     )
 
-    final_chunks = grading.accepted[: settings.RAG_FINAL_TOP_K]
+    accepted_chunks = grading.accepted[: settings.RAG_FINAL_TOP_K]
+
+    # 5. Context Compression & Token Budget Management
+    final_chunks = compress_context(
+        original_query, accepted_chunks, complexity=query_plan.complexity
+    )
 
     return RetrievalResult(
         chunks=final_chunks,
@@ -101,4 +109,5 @@ __all__ = [
     "grade_relevance",
     "reciprocal_rank_fusion",
     "retrieve_context",
+    "compress_context",
 ]

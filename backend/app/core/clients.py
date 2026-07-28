@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 COHERE_BASE = "https://api.cohere.com/v2"
+
+
+@dataclass(slots=True)
+class UsageInfo:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 
 class GeminiClient:
@@ -99,6 +107,7 @@ class GeminiClient:
         system: str | None = None,
         temperature: float = 0.2,
         max_output_tokens: int = 4096,
+        usage_info: UsageInfo | None = None,
     ) -> AsyncIterator[str]:
         """Stream text generation chunks from a prompt using the Gemini API."""
         if not self.api_key:
@@ -135,6 +144,12 @@ class GeminiClient:
                         break
 
                     chunk = json.loads(payload)
+                    if usage_info and "usageMetadata" in chunk:
+                        meta = chunk["usageMetadata"]
+                        usage_info.prompt_tokens = meta.get("promptTokenCount", 0)
+                        usage_info.completion_tokens = meta.get("candidatesTokenCount", 0)
+                        usage_info.total_tokens = meta.get("totalTokenCount", 0)
+
                     parts = (
                         chunk.get("candidates", [{}])[0]
                         .get("content", {})
@@ -157,12 +172,14 @@ class CohereClient:
         query: str,
         documents: list[str],
         *,
-        model: str = "rerank-english-v3.0",
+        model: str | None = None,
         top_n: int = 10,
     ) -> list[tuple[int, float]]:
         """Re-rank a list of document strings relative to a search query."""
         if not self.api_key:
             raise RuntimeError("COHERE_API_KEY is required for reranking")
+
+        model = model or settings.COHERE_RERANK_MODEL
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(

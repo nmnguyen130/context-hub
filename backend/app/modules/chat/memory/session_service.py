@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import func, select
@@ -11,6 +12,8 @@ from app.modules.chat.exceptions import ChatSessionNotFoundError
 from app.modules.chat.models import ChatMessage, ChatSession
 from app.modules.chat.schemas import ChatSessionCreate, ChatSessionUpdate
 from app.modules.documents.models import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class ChatSessionService:
@@ -57,9 +60,10 @@ class ChatSessionService:
     async def list_by_workspace(
         self,
         workspace_id: uuid.UUID,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
     ) -> tuple[list[ChatSession], int]:
         """List active chat sessions belonging to a workspace for current tenant/user."""
+        pagination = pagination or PaginationParams()
         ctx = try_current_context()
         if not ctx or not ctx.tenant_id or not ctx.user_id:
             raise ServiceError("Tenant and User context required", status_code=400)
@@ -93,8 +97,7 @@ class ChatSessionService:
         """Update chat session details (e.g. title)."""
         session = await self.get(session_id)
         for key, value in data.model_dump(exclude_unset=True).items():
-            if value is not None:
-                setattr(session, key, value)
+            setattr(session, key, value)
         await self.uow.flush()
         return session
 
@@ -107,9 +110,10 @@ class ChatSessionService:
     async def list_messages(
         self,
         session_id: uuid.UUID,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
     ) -> tuple[list[ChatMessage], int]:
         """List messages for a chat session with pagination."""
+        pagination = pagination or PaginationParams()
         await self.get(session_id)  # validate session exists and tenant matches
 
         stmt = (
@@ -153,8 +157,8 @@ class ChatSessionService:
                 session.title = title[:200]
                 await self.uow.flush()
                 return session.title
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Auto-titling LLM call failed: %s", exc)
 
         fallback = first_message[:50] + ("..." if len(first_message) > 50 else "")
         session.title = fallback
@@ -182,5 +186,6 @@ class ChatSessionService:
             session.running_summary = new_summary
             await self.uow.flush()
             return new_summary
-        except Exception:
+        except Exception as exc:
+            logger.warning("Summary update LLM call failed: %s", exc)
             return session.running_summary

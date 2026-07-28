@@ -49,20 +49,9 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
-# CORS Safety Validation
-origins = [x.strip() for x in settings.ALLOWED_ORIGINS.split(",") if x.strip()]
-if "*" in origins:
-    if settings.ENVIRONMENT == "production":
-        raise ValueError(
-            "CORS allow_origins cannot contain '*' in production environment."
-        )
-    logger.warning(
-        "CORS allow_origins contains '*' with credentials enabled. This is insecure."
-    )
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.parsed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,15 +84,10 @@ async def health_check(request: Request):
     except Exception:
         pass
 
-    overall_status = "healthy" if (db_ok and redis_ok) else "degraded"
-
     return {
-        "status": overall_status,
-        "environment": settings.ENVIRONMENT,
-        "components": {
-            "database": "reachable" if db_ok else "unreachable",
-            "redis": "reachable" if redis_ok else "unreachable",
-        },
+        "status": "healthy" if (db_ok and redis_ok) else "degraded",
+        "database": db_ok,
+        "redis": redis_ok,
     }
 
 

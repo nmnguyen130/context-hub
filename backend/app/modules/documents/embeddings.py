@@ -46,9 +46,9 @@ class EmbeddingProvider:
             try:
                 vectors = await self._embed_batch_with_retry(batch, i // BATCH_SIZE)
                 all_vectors.extend(vectors)
-            except Exception as e:
+            except Exception:
                 logger.error("Failed embedding batch starting at index %s", i)
-                raise e
+                raise
         return all_vectors
 
     async def embed_query(self, query: str) -> list[float]:

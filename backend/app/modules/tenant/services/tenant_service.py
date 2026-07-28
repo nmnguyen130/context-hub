@@ -31,11 +31,12 @@ class TenantService:
 
     async def list(
         self,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
         search: str | None = None,
         order_by: str = "created_at",
     ) -> tuple[list[Tenant], int]:
         """List tenants with pagination, search, and ordering constraints."""
+        pagination = pagination or PaginationParams()
         stmt = select(Tenant)
 
         if search:

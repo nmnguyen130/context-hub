@@ -109,9 +109,10 @@ class InvitationService:
         self,
         tenant_id: UUID,
         status: InvitationStatus | None = None,
-        pagination: PaginationParams = PaginationParams(),
+        pagination: PaginationParams | None = None,
     ) -> tuple[list[Invitation], int]:
         """List invitations for a tenant, optionally filtered by status, with pagination."""
+        pagination = pagination or PaginationParams()
         stmt = select(Invitation).where(Invitation.tenant_id == tenant_id)
         if status:
             stmt = stmt.where(Invitation.status == status)

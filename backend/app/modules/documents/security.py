@@ -103,6 +103,16 @@ def mask_pii(text: str, matches: list[DLPMatch]) -> tuple[str, dict[str, str]]:
     return result, vault
 
 
+def unmask_pii(text: str, vault: dict[str, str] | None = None) -> str:
+    """Replace PII tokens back with their original unmasked values."""
+    if not vault:
+        return text
+    result = text
+    for token, original_val in vault.items():
+        result = result.replace(token, original_val)
+    return result
+
+
 def apply_dlp(
     text: str,
     workspace_dlp_rules: dict | None = None,

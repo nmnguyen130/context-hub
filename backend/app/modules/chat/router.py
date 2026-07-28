@@ -8,6 +8,7 @@ from app.api.dependencies import get_authenticated_context, get_service
 from app.core.context import RequestContext
 from app.core.exceptions import ServiceError
 from app.core.pagination import PaginatedResponse, PaginationParams
+from app.infrastructure.rate_limiter import PlanPolicyProvider, RateLimiter
 from app.modules.chat.memory import ChatSessionService
 from app.modules.chat.schemas import (
     ChatMessageResponse,
@@ -21,6 +22,14 @@ from app.modules.chat.services import ChatService
 
 logger = logging.getLogger(__name__)
 
+chat_stream_rate_limiter = RateLimiter(
+    policy_provider=PlanPolicyProvider(
+        key_prefix="chat_stream",
+        default_requests=10,
+        custom_plan_limits={"enterprise": 60, "pro": 30},
+    )
+)
+
 chat_router = APIRouter(
     prefix="/chat",
     tags=["Chat"],
@@ -32,6 +41,7 @@ chat_router = APIRouter(
     "/stream",
     summary="Stream grounded RAG chat response",
     description="Stream tokens and metadata citations via Server-Sent Events (SSE).",
+    dependencies=[Depends(chat_stream_rate_limiter)],
 )
 async def stream_chat(
     request: Request,

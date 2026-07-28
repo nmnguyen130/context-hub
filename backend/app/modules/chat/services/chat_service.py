@@ -8,15 +8,17 @@ from app.core.config import settings
 from app.core.context import RequestContext
 from app.core.exceptions import ServiceError
 from app.core.uow import UnitOfWork
+from app.utils.pricing import calculate_model_cost
 from app.modules.chat.cache.semantic_cache import SemanticCache
 from app.modules.chat.generation import stream_synthesis
+from app.modules.chat.grounding import check_faithfulness, compute_composite_confidence
 from app.modules.chat.memory import (
     ChatSessionService,
     format_history_for_prompt,
     get_recent_messages,
 )
 from app.modules.chat.models import ChatMessage, ChatSession
-from app.modules.chat.query import QueryComplexity, prepare_queries
+from app.modules.chat.query import QueryComplexity, QueryPlan, prepare_queries
 from app.modules.chat.query.rewriter import rewrite_query
 from app.modules.chat.retrieval import Reranker, retrieve_context
 from app.modules.chat.schemas import ChatRequest, ChatSessionCreate, SSEEvent
@@ -136,11 +138,15 @@ class ChatService:
                 request.message, history_texts, client=self.gemini_client
             )
             retry_embedding = await self.embedder.embed_query(rewritten)
-            query_plan.queries.append(rewritten)
-            query_plan.embeddings.append(retry_embedding)
+            retry_plan = QueryPlan(
+                queries=[rewritten],
+                embeddings=[retry_embedding],
+                complexity=query_plan.complexity,
+                rewritten_query=rewritten,
+            )
 
             retrieval = await retrieve_context(
-                query_plan=query_plan,
+                query_plan=retry_plan,
                 workspace_ids=[request.workspace_id],
                 tenant_id=context.tenant_id,
                 session=self.uow.session,
@@ -153,23 +159,45 @@ class ChatService:
         session_id = session.id
         await self.uow.commit()
 
-        # 7. Generation Pipeline (Streaming Synthesis)
+        # 7. Stream synthesis response
         full_text = ""
         citations: list[dict[str, Any]] = []
+        usage_data: dict[str, int] = {}
 
         async for event in stream_synthesis(
             query=request.message,
             chunks=retrieval.chunks,
             running_summary=running_summary,
             client=self.gemini_client,
+            model=request.model,
+            history=history_texts,
         ):
             yield event
             if event.type == "done":
                 full_text = event.data.get("full_text", "")
+                usage_data = event.data.get("usage", {})
             elif event.type == "citations":
                 citations = event.data
 
-        # 8. Persist User and Assistant Messages in fresh transaction scope
+        # Evaluate grounding and composite confidence
+        faithfulness_score, _ = check_faithfulness(full_text, retrieval.chunks)
+        citation_coverage = min(1.0, len(citations) / max(len(full_text.split(".")), 1))
+        composite_confidence = compute_composite_confidence(
+            retrieval_confidence=retrieval.confidence,
+            faithfulness_score=faithfulness_score,
+            citation_coverage=citation_coverage,
+        )
+
+        # Calculate cost via model pricing utility
+        prompt_tokens = usage_data.get("prompt_tokens") or len(request.message.split())
+        completion_tokens = usage_data.get("completion_tokens") or len(full_text.split())
+        cost_usd = calculate_model_cost(
+            model_name=settings.RAG_CHAT_MODEL,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+        # 8. Save session history
         session = await self.session_service.get(session_id)
         retrieved_chunk_ids = [str(c.id) for c in retrieval.chunks]
         await self._persist_messages(
@@ -179,6 +207,10 @@ class ChatService:
             citations=citations,
             retrieved_chunk_ids=retrieved_chunk_ids,
             context=context,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+            confidence_score=composite_confidence,
         )
 
         # Auto-title on first message if needed
@@ -243,15 +275,22 @@ class ChatService:
         citations: list[dict[str, Any]],
         retrieved_chunk_ids: list[str],
         context: RequestContext,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost_usd: float = 0.0,
+        confidence_score: float | None = None,
     ) -> None:
         """Save user query and assistant response messages to the database and update session statistics."""
+        user_tokens = prompt_tokens or len(user_query.split())
+        asst_tokens = completion_tokens or len(assistant_response.split())
+
         user_msg = ChatMessage(
             id=uuid.uuid4(),
             tenant_id=context.tenant_id,
             session_id=session.id,
             role="user",
             content=user_query,
-            token_count=len(user_query.split()),
+            token_count=user_tokens,
         )
 
         asst_msg = ChatMessage(
@@ -262,12 +301,15 @@ class ChatService:
             content=assistant_response,
             citations=citations,
             retrieved_chunks=retrieved_chunk_ids,
-            token_count=len(assistant_response.split()),
+            token_count=asst_tokens,
+            cost_usd=cost_usd,
+            confidence_score=confidence_score,
         )
 
         self.uow.session.add(user_msg)
         self.uow.session.add(asst_msg)
 
         session.message_count += 2
-        session.total_tokens += user_msg.token_count + asst_msg.token_count
+        session.total_tokens += user_tokens + asst_tokens
+        session.total_cost_usd += cost_usd
         await self.uow.flush()

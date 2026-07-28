@@ -1,10 +1,9 @@
-"""Multi-query expansion for ambiguous COMPLEX queries."""
-
-from __future__ import annotations
-
 import json
+import logging
 
 from app.core.clients import GeminiClient
+
+logger = logging.getLogger(__name__)
 
 
 async def expand_query(
@@ -12,6 +11,7 @@ async def expand_query(
     client: GeminiClient | None = None,
     count: int = 3,
 ) -> list[str]:
+    """Generate alternative phrasings of query for expanded retrieval."""
     client = client or GeminiClient()
     prompt = (
         f"Generate {count} alternative phrasings of this search query. "
@@ -23,6 +23,6 @@ async def expand_query(
         parsed = json.loads(raw.strip())
         if isinstance(parsed, list):
             return [str(q) for q in parsed[:count]]
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as exc:
+        logger.warning("Query expansion JSON decoding failed: %s", exc)
     return [query]
