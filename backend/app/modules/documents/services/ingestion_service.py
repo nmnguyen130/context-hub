@@ -2,7 +2,8 @@ import io
 import logging
 import uuid
 
-from sqlalchemy import update
+from sqlalchemy import select, update
+from sqlalchemy.orm import joinedload
 
 from app.core.uow import UnitOfWork
 from app.infrastructure.storage import StorageProvider
@@ -35,12 +36,17 @@ class IngestionService:
 
     async def process_document(self, document_id: uuid.UUID) -> None:
         """Orchestrate the ingestion process for a single document."""
-        document = await self.uow.session.get(Document, document_id)
+        stmt = (
+            select(Document)
+            .options(joinedload(Document.workspace))
+            .where(Document.id == document_id)
+        )
+        document = await self.uow.session.scalar(stmt)
         if document is None:
             logger.error("Document %s not found for ingestion", document_id)
             return
 
-        workspace = await self.uow.session.get(Workspace, document.workspace_id)
+        workspace = document.workspace
         if workspace is None:
             document.status = DocumentStatus.ERROR
             document.error_message = "Workspace not found"
@@ -95,7 +101,6 @@ class IngestionService:
                         document_id=document.id,
                         workspace_id=document.workspace_id,
                         chunk_index=chunk.chunk_index,
-                        version=document.version,
                         content=chunk.content,
                         token_count=chunk.token_count,
                         embedding=embedding,
@@ -107,18 +112,12 @@ class IngestionService:
             self.uow.session.add_all(db_chunks)
             await self.uow.flush()
             chunk_ids = [c.id for c in db_chunks]
-            await update_search_vectors(
-                self.uow.session, chunk_ids, tenant_id=document.tenant_id
-            )
+            await update_search_vectors(self.uow.session, chunk_ids)
 
-            extracted_key = (
-                f"tenants/{document.tenant_id}/documents/{document.id}/extracted.txt"
-            )
             await self.storage.upload_file(
-                io.BytesIO(safe_text.encode()), extracted_key
+                io.BytesIO(safe_text.encode()), document.extracted_text_key
             )
 
-            document.extracted_text_key = extracted_key
             document.status = DocumentStatus.ACTIVE
             document.error_message = None
             document.record_event(
@@ -135,11 +134,10 @@ class IngestionService:
         except Exception as exc:
             logger.exception("Ingestion failed for document %s", document_id)
             await self.uow.rollback()
-            async with self.uow:
-                doc = await self.uow.session.get(Document, document_id)
-                if doc:
-                    doc.status = DocumentStatus.ERROR
-                    doc.error_message = str(exc)[:500]
+            doc = await self.uow.session.get(Document, document_id)
+            if doc:
+                doc.status = DocumentStatus.ERROR
+                doc.error_message = str(exc)[:500]
                 await self.uow.commit()
 
     async def _download(self, key: str) -> bytes:

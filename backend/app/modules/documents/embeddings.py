@@ -5,7 +5,7 @@ import random
 
 from app.core.clients import GeminiClient
 from app.core.config import settings
-from app.modules.documents.exceptions import EmbeddingError
+from app.core.exceptions import ServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,9 @@ def validate_dimension(vector: list[float]) -> list[float]:
     """Validate the embedding dimension and apply L2 normalization."""
     expected = settings.RAG_EMBEDDING_DIMENSION
     if len(vector) != expected:
-        raise EmbeddingError(
-            f"Embedding dimension mismatch: expected {expected}, got {len(vector)}"
+        raise ServiceError(
+            f"Embedding dimension mismatch: expected {expected}, got {len(vector)}",
+            status_code=503,
         )
     return l2_normalize(vector)
 
@@ -76,7 +77,8 @@ class EmbeddingProvider:
                 )
                 await asyncio.sleep(delay)
 
-        raise EmbeddingError(
+        raise ServiceError(
             f"Embedding failed for batch {batch_idx} after {MAX_RETRIES} retries. "
-            f"Last error: {last_error}"
+            f"Last error: {last_error}",
+            status_code=503,
         )

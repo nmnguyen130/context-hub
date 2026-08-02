@@ -46,6 +46,7 @@ async def test_message_feedback_update(uow, make_tenant_uow):
     async with make_tenant_uow(tenant.id, user.id) as tenant_uow:
         service = ChatSessionService(uow=tenant_uow)
         updated_msg = await service.set_message_feedback(
+            tenant_id=tenant.id,
             message_id=msg.id,
             feedback="up",
             feedback_note="Accurate response",

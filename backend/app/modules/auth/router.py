@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, status
 
 from app.api.dependencies import (
     get_authenticated_context,
@@ -8,12 +8,13 @@ from app.api.dependencies import (
     require_roles,
 )
 from app.core.context import RequestContext, UserRole
-from app.core.pagination import PaginatedResponse, PaginationParams
+from app.core.pagination import CursorPage, CursorParams
 from app.modules.auth.models import InvitationStatus
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
     InvitationAccept,
     InvitationCreate,
+    InvitationCreateResponse,
     InvitationResponse,
     LoginRequest,
     RefreshRequest,
@@ -32,7 +33,7 @@ from app.modules.auth.services import (
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# 1. Public Authentication & Registration Endpoints (RLS Bypassed via Admin UoW)
+# 1. Public Authentication & Registration Endpoints
 
 
 @auth_router.post(
@@ -90,7 +91,7 @@ async def accept_invitation(
     return user
 
 
-# 2. Authenticated Session Endpoints (Scoped to Logged-in Tenant)
+# 2. Authenticated Session Endpoints
 
 
 @auth_router.post(
@@ -113,11 +114,11 @@ async def logout_all(
     auth_service: AuthService = Depends(get_service(AuthService)),
 ):
     """Logs out all active sessions for the current authenticated user."""
-    await auth_service.logout_all(context.user_id)
+    await auth_service.logout_all(context.tenant_id, context.user_id)
     await auth_service.uow.commit()
 
 
-# 3. User Management Endpoints (Scoped to Logged-in Tenant)
+# 3. User Management Endpoints
 
 
 @auth_router.get("/me", response_model=UserResponse)
@@ -140,21 +141,21 @@ async def change_password(
     await user_service.uow.commit()
 
 
-@auth_router.get("/users", response_model=PaginatedResponse[UserResponse])
+@auth_router.get("/users", response_model=CursorPage[UserResponse])
 async def list_users(
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
     is_active: bool | None = None,
     context: RequestContext = Depends(get_authenticated_context),
     user_service: UserService = Depends(get_service(UserService)),
 ):
     """Lists all users belonging to the current tenant organization."""
-    users, total = await user_service.list_users(
+    items, next_cursor, has_more = await user_service.list_users(
         tenant_id=context.tenant_id,
-        pagination=pagination,
+        params=params,
         is_active=is_active,
     )
-    return PaginatedResponse[UserResponse].create(
-        items=users, total=total, pagination=pagination
+    return CursorPage[UserResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
     )
 
 
@@ -205,17 +206,16 @@ async def reactivate_user(
     await user_service.uow.commit()
 
 
-# 4. Invitation Management Endpoints (Scoped to Logged-in Tenant)
+# 4. Invitation Management Endpoints
 
 
-@auth_router.post("/invitations", response_model=InvitationResponse)
+@auth_router.post("/invitations", response_model=InvitationCreateResponse)
 async def create_invitation(
     data: InvitationCreate,
-    response: Response,
     context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
-    """Creates a new invitation. Admin only. Returns token in custom header X-Invite-Token."""
+    """Creates a new invitation. Admin only."""
     invitation, token = await invite_service.create_invitation(
         tenant_id=context.tenant_id,
         invited_by=context.user_id,
@@ -223,29 +223,30 @@ async def create_invitation(
         acting_user_role=context.role,
     )
     await invite_service.uow.commit()
-
-    response.headers["X-Invite-Token"] = token
-    return invitation
+    return InvitationCreateResponse(
+        invitation=InvitationResponse.model_validate(invitation),
+        invite_token=token,
+    )
 
 
 @auth_router.get(
     "/invitations",
-    response_model=PaginatedResponse[InvitationResponse],
+    response_model=CursorPage[InvitationResponse],
 )
 async def list_invitations(
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
     status: InvitationStatus | None = None,
     context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
     """Lists all invitations sent from this tenant. Admin only."""
-    items, total = await invite_service.list_invitations(
+    items, next_cursor, has_more = await invite_service.list_invitations(
         tenant_id=context.tenant_id,
         status=status,
-        pagination=pagination,
+        params=params,
     )
-    return PaginatedResponse[InvitationResponse].create(
-        items=items, total=total, pagination=pagination
+    return CursorPage[InvitationResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
     )
 
 
@@ -264,11 +265,10 @@ async def revoke_invitation(
 
 
 @auth_router.post(
-    "/invitations/{invitation_id}/resend", response_model=InvitationResponse
+    "/invitations/{invitation_id}/resend", response_model=InvitationCreateResponse
 )
 async def resend_invitation(
     invitation_id: UUID,
-    response: Response,
     context: RequestContext = Depends(require_roles(UserRole.ADMIN, UserRole.OWNER)),
     invite_service: InvitationService = Depends(get_service(InvitationService)),
 ):
@@ -279,5 +279,7 @@ async def resend_invitation(
         resending_user_id=context.user_id,
     )
     await invite_service.uow.commit()
-    response.headers["X-Invite-Token"] = token
-    return invitation
+    return InvitationCreateResponse(
+        invitation=InvitationResponse.model_validate(invitation),
+        invite_token=token,
+    )

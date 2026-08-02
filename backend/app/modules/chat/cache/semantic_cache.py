@@ -23,7 +23,6 @@ class SemanticCache:
         session: AsyncSession,
         query_embedding: list[float],
         workspace_id: uuid.UUID,
-        tenant_id: uuid.UUID,
         threshold: float | None = None,
     ) -> dict[str, Any] | None:
         """Query pgvector for a semantically similar cached response for the workspace."""
@@ -41,7 +40,6 @@ class SemanticCache:
             stmt = (
                 select(ChatCacheEntry, dist.label("distance"))
                 .where(
-                    ChatCacheEntry.tenant_id == tenant_id,
                     ChatCacheEntry.workspace_id == workspace_id,
                     ChatCacheEntry.expires_at > now,
                     dist <= max_distance,
@@ -86,17 +84,18 @@ class SemanticCache:
             seconds=ttl or settings.RAG_SEMANTIC_CACHE_TTL
         )
         try:
-            entry = ChatCacheEntry(
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-                query_text=query_text,
-                query_embedding=query_embedding,
-                response_text=response_text,
-                citations=citations,
-                expires_at=expires_at,
-            )
-            session.add(entry)
-            await session.flush()
+            async with session.begin_nested():
+                entry = ChatCacheEntry(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    query_text=query_text,
+                    query_embedding=query_embedding,
+                    response_text=response_text,
+                    citations=citations,
+                    expires_at=expires_at,
+                )
+                session.add(entry)
+                await session.flush()
             logger.debug("Stored entry %s in semantic cache", entry.id)
         except Exception as exc:
             logger.warning("Semantic cache set failed: %s", exc)

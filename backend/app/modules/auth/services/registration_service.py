@@ -32,14 +32,12 @@ class RegistrationService:
                 algorithms=[settings.JWT_ALGORITHM],
             )
         except jwt.PyJWTError:
-            raise ServiceError("Invalid or expired invitation token", status_code=400)
+            raise ServiceError.bad_request("Invalid or expired invitation token")
 
     async def register(self, data: RegisterRequest) -> tuple[User, Tenant]:
         """Register a new Tenant organization and its first Administrator user."""
-        # Create Tenant via TenantService (handles slug generation and existence checks)
         tenant = await self.tenant_service.create(TenantCreate(name=data.tenant_name))
 
-        # Create Admin User under the new Tenant
         user = User(
             tenant_id=tenant.id,
             email=data.email.strip().lower(),
@@ -59,39 +57,40 @@ class RegistrationService:
         tenant_id = UUID(payload["tenant_id"])
         invite_email = payload["email"]
 
-        if data.email.strip().lower() != invite_email.strip().lower():
-            raise ServiceError(
-                "Email address does not match invitation", status_code=400
-            )
+        clean_email = data.email.strip().lower()
+        if clean_email != invite_email.strip().lower():
+            raise ServiceError.bad_request("Email address does not match invitation")
 
-        invitation = await self.uow.session.get(Invitation, invite_id)
-        if not invitation or invitation.token_hash != hash_token(data.invite_token):
-            raise ServiceError(
-                "Invitation not found or token modified", status_code=404
-            )
+        stmt = select(
+            Invitation,
+            select(User.id)
+            .where(User.email == clean_email, User.tenant_id == tenant_id)
+            .exists()
+            .label("user_exists"),
+        ).where(Invitation.id == invite_id)
+
+        row = (await self.uow.session.execute(stmt)).first()
+        if not row:
+            raise ServiceError.not_found("Invitation")
+
+        invitation, user_exists = row.tuple()
+
+        if invitation.token_hash != hash_token(data.invite_token):
+            raise ServiceError.not_found("Invitation")
 
         if invitation.status != InvitationStatus.PENDING:
-            raise ServiceError(
-                f"Invitation has already been {invitation.status.lower()}",
-                status_code=400,
+            raise ServiceError.bad_request(
+                f"Invitation has already been {invitation.status.lower()}"
             )
 
         if invitation.expires_at < datetime.now(UTC):
-            raise ServiceError("Invitation token has expired", status_code=400)
+            raise ServiceError.bad_request("Invitation token has expired")
 
-        # Check if user already exists
-        existing_user = await self.uow.session.scalar(
-            select(User).where(
-                User.email == data.email.strip().lower(),
-                User.tenant_id == tenant_id,
-            )
-        )
-        if existing_user:
-            raise ServiceError(
-                "Email is already registered in this organization", status_code=409
+        if user_exists:
+            raise ServiceError.conflict(
+                "Email is already registered in this organization"
             )
 
-        # Create User
         user = User(
             tenant_id=tenant_id,
             email=data.email.strip().lower(),
@@ -101,7 +100,6 @@ class RegistrationService:
         )
         self.uow.session.add(user)
 
-        # Mark invitation as accepted
         invitation.status = InvitationStatus.ACCEPTED
         await self.uow.flush()
 

@@ -79,7 +79,6 @@ class ChatService:
                     session=self.uow.session,
                     query_embedding=query_embedding,
                     workspace_id=request.workspace_id,
-                    tenant_id=context.tenant_id,
                 )
                 if cached:
                     citations = cached.get("citations", [])
@@ -102,7 +101,6 @@ class ChatService:
                         user_query=request.message,
                         assistant_response=cached["content"],
                         citations=cached.get("citations", []),
-                        retrieved_chunk_ids=[],
                         context=context,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
@@ -124,7 +122,6 @@ class ChatService:
         retrieval = await retrieve_context(
             query_plan=query_plan,
             workspace_ids=[request.workspace_id],
-            tenant_id=context.tenant_id,
             session=self.uow.session,
             reranker=self.reranker,
             original_query=request.message,
@@ -154,7 +151,6 @@ class ChatService:
             retrieval = await retrieve_context(
                 query_plan=retry_plan,
                 workspace_ids=[request.workspace_id],
-                tenant_id=context.tenant_id,
                 session=self.uow.session,
                 reranker=self.reranker,
                 original_query=rewritten,
@@ -207,13 +203,11 @@ class ChatService:
         )
 
         # 8. Save session history
-        retrieved_chunk_ids = [str(c.id) for c in retrieval.chunks]
         user_msg, asst_msg = await self._persist_messages(
             session=session,
             user_query=request.message,
             assistant_response=full_text,
             citations=citations,
-            retrieved_chunk_ids=retrieved_chunk_ids,
             context=context,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -224,16 +218,14 @@ class ChatService:
         # Auto-title on first message if needed
         if session.message_count <= 2 or session.title == "New Conversation":
             await self.session_service.auto_title(
-                session.id, request.message, client=self.gemini_client
+                session, request.message, client=self.gemini_client
             )
 
         # Update running summary periodically using current turn messages
         if session.message_count % settings.RAG_MEMORY_WINDOW == 0:
             await self.session_service.update_summary(
-                session.id, [user_msg, asst_msg], client=self.gemini_client
+                session, [user_msg, asst_msg], client=self.gemini_client
             )
-
-        await self.uow.commit()
 
         # Write to Semantic Cache if single-turn query
         if not history_texts and settings.ENABLE_SEMANTIC_CACHE and full_text:
@@ -248,24 +240,34 @@ class ChatService:
                 response_text=full_text,
                 citations=citations,
             )
-            await self.uow.commit()
+
+        await self.uow.commit()
 
     async def _resolve_session(
         self, request: ChatRequest, context: RequestContext
     ) -> ChatSession:
         """Resolve session by ID or create a new session if not supplied."""
         if request.session_id:
-            return await self.session_service.get(request.session_id, require_owner=True)
+            return await self.session_service.get(
+                tenant_id=context.tenant_id,
+                session_id=request.session_id,
+                user_id=context.user_id,
+            )
 
         workspace = await self.uow.session.get(Workspace, request.workspace_id)
-        if workspace is None or workspace.tenant_id != context.tenant_id:
+        if (
+            workspace is None
+            or workspace.tenant_id != context.tenant_id
+            or not workspace.is_active
+        ):
             raise ServiceError("Workspace not found", status_code=404)
 
-        create_data = ChatSessionCreate(
-            workspace_id=request.workspace_id,
+        return await self.session_service.create_for_workspace(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            workspace=workspace,
             title="New Conversation",
         )
-        return await self.session_service.create(create_data)
 
     async def _persist_messages(
         self,
@@ -273,7 +275,6 @@ class ChatService:
         user_query: str,
         assistant_response: str,
         citations: list[dict[str, Any]],
-        retrieved_chunk_ids: list[str],
         context: RequestContext,
         prompt_tokens: int,
         completion_tokens: int,
@@ -297,14 +298,12 @@ class ChatService:
             role="assistant",
             content=assistant_response,
             citations=citations,
-            retrieved_chunks=retrieved_chunk_ids,
             token_count=completion_tokens,
             cost_usd=cost_usd,
             confidence_score=confidence_score,
         )
 
-        self.uow.session.add(user_msg)
-        self.uow.session.add(asst_msg)
+        self.uow.session.add_all([user_msg, asst_msg])
 
         session.message_count += 2
         session.total_tokens += prompt_tokens + completion_tokens

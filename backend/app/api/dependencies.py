@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 
 from app.core.context import (
     RequestContext,
@@ -10,6 +10,13 @@ from app.core.context import (
 )
 from app.core.database import app_session, owner_session
 from app.core.uow import UnitOfWork
+from app.infrastructure.storage import StorageProvider
+
+
+def get_storage(request: Request) -> StorageProvider:
+    """Retrieve StorageProvider instance from application state."""
+    return request.app.state.storage
+
 
 # 1. Security & Identity Context Extraction
 

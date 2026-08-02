@@ -1,14 +1,12 @@
 import logging
-import uuid
+from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, select
 
 from app.core.clients import GeminiClient
-from app.core.context import try_current_context
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams, paginate_cursor
 from app.core.uow import UnitOfWork
-from app.modules.chat.exceptions import ChatSessionNotFoundError
 from app.modules.chat.models import ChatMessage, ChatSession
 from app.modules.chat.schemas import ChatSessionCreate, ChatSessionUpdate
 from app.modules.documents.models import Workspace
@@ -20,135 +18,131 @@ class ChatSessionService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def create(self, data: ChatSessionCreate) -> ChatSession:
+    async def create(
+        self, tenant_id: UUID, user_id: UUID, data: ChatSessionCreate
+    ) -> ChatSession:
         """Create a new chat session for the given workspace."""
-        ctx = try_current_context()
-        if not ctx or not ctx.tenant_id or not ctx.user_id:
-            raise ServiceError("Tenant and User context required", status_code=400)
-
         workspace = await self.uow.session.get(Workspace, data.workspace_id)
-        if workspace is None or workspace.tenant_id != ctx.tenant_id:
-            raise ServiceError("Workspace not found", status_code=404)
+        if (
+            workspace is None
+            or workspace.tenant_id != tenant_id
+            or not workspace.is_active
+        ):
+            raise ServiceError.not_found("Workspace")
 
+        return await self.create_for_workspace(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace=workspace,
+            title=data.title,
+        )
+
+    async def create_for_workspace(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        workspace: Workspace,
+        title: str | None = None,
+    ) -> ChatSession:
+        """Create a session directly from a validated workspace object without redundant lookup."""
         session = ChatSession(
-            tenant_id=ctx.tenant_id,
-            user_id=ctx.user_id,
-            workspace_id=data.workspace_id,
-            title=data.title or "New Conversation",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace.id,
+            title=title or "New Conversation",
         )
         self.uow.session.add(session)
         await self.uow.flush()
         return session
 
     async def get(
-        self, session_id: uuid.UUID, require_owner: bool = False
+        self, tenant_id: UUID, session_id: UUID, user_id: UUID | None = None
     ) -> ChatSession:
         """Retrieve a chat session by ID with tenant and optional user ownership validation."""
-        ctx = try_current_context()
         session = await self.uow.session.get(ChatSession, session_id)
-        if session is None:
-            raise ChatSessionNotFoundError()
+        if session is None or session.tenant_id != tenant_id:
+            raise ServiceError.not_found("Chat session")
 
-        if ctx and ctx.tenant_id and session.tenant_id != ctx.tenant_id:
-            raise ChatSessionNotFoundError()
-
-        if require_owner and ctx and ctx.user_id and session.user_id != ctx.user_id:
-            raise ChatSessionNotFoundError()
+        if user_id and session.user_id != user_id:
+            raise ServiceError.not_found("Chat session")
 
         return session
 
     async def list_by_workspace(
         self,
-        workspace_id: uuid.UUID,
-        pagination: PaginationParams | None = None,
-    ) -> tuple[list[ChatSession], int]:
-        """List active chat sessions belonging to a workspace for current tenant/user."""
-        pagination = pagination or PaginationParams()
-        ctx = try_current_context()
-        if not ctx or not ctx.tenant_id or not ctx.user_id:
-            raise ServiceError("Tenant and User context required", status_code=400)
-
-        stmt = (
-            select(ChatSession)
-            .where(
-                ChatSession.tenant_id == ctx.tenant_id,
-                ChatSession.workspace_id == workspace_id,
-                ChatSession.user_id == ctx.user_id,
-            )
-            .order_by(ChatSession.updated_at.desc())
+        tenant_id: UUID,
+        user_id: UUID,
+        workspace_id: UUID,
+        params: CursorParams | None = None,
+    ) -> tuple[list[ChatSession], str | None, bool]:
+        """List active chat sessions belonging to a workspace with pagination."""
+        params = params or CursorParams()
+        stmt = select(ChatSession).where(
+            ChatSession.tenant_id == tenant_id,
+            ChatSession.workspace_id == workspace_id,
+            ChatSession.user_id == user_id,
         )
-
-        total = (
-            await self.uow.session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=ChatSession.updated_at,
+            id_column=ChatSession.id,
         )
-        items = (
-            await self.uow.session.scalars(
-                stmt.offset(pagination.offset).limit(pagination.limit)
-            )
-        ).all()
-        return list(items), total
 
     async def update(
-        self, session_id: uuid.UUID, data: ChatSessionUpdate
+        self, tenant_id: UUID, session_id: UUID, data: ChatSessionUpdate
     ) -> ChatSession:
         """Update chat session details (e.g. title)."""
-        session = await self.get(session_id)
+        session = await self.get(tenant_id, session_id)
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(session, key, value)
         await self.uow.flush()
         return session
 
-    async def delete(self, session_id: uuid.UUID) -> None:
+    async def delete(self, tenant_id: UUID, session_id: UUID) -> None:
         """Delete a chat session and all its messages."""
-        session = await self.get(session_id)
-        await self.uow.session.delete(session)
+        stmt = delete(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == tenant_id,
+        )
+        res = await self.uow.session.execute(stmt)
+        if res.rowcount == 0:
+            raise ServiceError.not_found("Chat session")
         await self.uow.flush()
 
     async def list_messages(
         self,
-        session_id: uuid.UUID,
-        pagination: PaginationParams | None = None,
-    ) -> tuple[list[ChatMessage], int]:
-        """List messages for a chat session with pagination."""
-        pagination = pagination or PaginationParams()
-        await self.get(session_id)  # validate session exists and tenant matches
-
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.asc())
+        tenant_id: UUID,
+        session_id: UUID,
+        params: CursorParams | None = None,
+    ) -> tuple[list[ChatMessage], str | None, bool]:
+        """List messages for a chat session with pagination in chronological order."""
+        params = params or CursorParams()
+        stmt = select(ChatMessage).where(
+            ChatMessage.session_id == session_id,
+            ChatMessage.tenant_id == tenant_id,
         )
-
-        total = (
-            await self.uow.session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=ChatMessage.created_at,
+            id_column=ChatMessage.id,
+            ascending=True,
         )
-        items = (
-            await self.uow.session.scalars(
-                stmt.offset(pagination.offset).limit(pagination.limit)
-            )
-        ).all()
-        return list(items), total
 
     async def set_message_feedback(
         self,
-        message_id: uuid.UUID,
+        tenant_id: UUID,
+        message_id: UUID,
         feedback: str,
         feedback_note: str | None = None,
     ) -> ChatMessage:
         """Set user feedback rating (up/down) and optional note for a message."""
-        ctx = try_current_context()
         message = await self.uow.session.get(ChatMessage, message_id)
-        if message is None:
-            raise ServiceError("Message not found", status_code=404)
-
-        if ctx and ctx.tenant_id and message.tenant_id != ctx.tenant_id:
-            raise ServiceError("Message not found", status_code=404)
+        if message is None or message.tenant_id != tenant_id:
+            raise ServiceError.not_found("Message")
 
         message.feedback = feedback
         message.feedback_note = feedback_note
@@ -157,12 +151,11 @@ class ChatSessionService:
 
     async def auto_title(
         self,
-        session_id: uuid.UUID,
+        session: ChatSession,
         first_message: str,
         client: GeminiClient | None = None,
     ) -> str:
         """Generate a concise title for a session from the first user message."""
-        session = await self.get(session_id)
         client = client or GeminiClient()
         prompt = (
             "Generate a concise 3-6 word title summarizing this initial user query. "
@@ -187,12 +180,11 @@ class ChatSessionService:
 
     async def update_summary(
         self,
-        session_id: uuid.UUID,
+        session: ChatSession,
         messages: list[ChatMessage],
         client: GeminiClient | None = None,
     ) -> str | None:
         """Incrementally update the rolling summary of the conversation."""
-        session = await self.get(session_id)
         client = client or GeminiClient()
         history_str = "\n".join([f"{m.role}: {m.content}" for m in messages[-6:]])
 

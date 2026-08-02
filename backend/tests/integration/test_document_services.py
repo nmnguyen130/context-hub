@@ -6,7 +6,7 @@ import pytest
 
 from app.core.context import RequestContext, UserRole
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams
 from app.infrastructure.storage import StorageProvider
 from app.modules.documents.models import Document, DocumentStatus, Workspace
 from app.modules.documents.schemas import WorkspaceCreate, WorkspaceUpdate
@@ -28,7 +28,7 @@ async def test_workspace_service_lifecycle(uow, make_tenant_uow):
     async with make_tenant_uow(tenant.id) as tenant_uow:
         service = WorkspaceService(tenant_uow)
         data = WorkspaceCreate(name="Research Project", slug="research-project")
-        workspace = await service.create(data)
+        workspace = await service.create(tenant.id, data)
         await tenant_uow.commit()
 
         assert workspace.name == "Research Project"
@@ -37,12 +37,14 @@ async def test_workspace_service_lifecycle(uow, make_tenant_uow):
 
         # Step 2: Prevent duplicate slug within same tenant
         with pytest.raises(ServiceError) as exc_info:
-            await service.create(data)
+            await service.create(tenant.id, data)
         assert exc_info.value.status_code == 409
 
         # Step 3: List workspaces
-        items, total = await service.list(PaginationParams(limit=10, offset=0))
-        assert total == 1
+        items, next_cursor, has_more = await service.list(
+            tenant.id, CursorParams(limit=10)
+        )
+        assert len(items) == 1
         assert items[0].name == "Research Project"
 
         # Step 4: Update workspace
@@ -79,7 +81,9 @@ async def test_document_service_lifecycle(uow, make_tenant_uow):
     async with make_tenant_uow(tenant.id, user_id=user.id) as tenant_uow:
         # Create a workspace first
         ws_service = WorkspaceService(tenant_uow)
-        workspace = await ws_service.create(WorkspaceCreate(name="My Workspace"))
+        workspace = await ws_service.create(
+            tenant.id, WorkspaceCreate(name="My Workspace")
+        )
         await tenant_uow.flush()
 
         doc_service = DocumentService(tenant_uow)
@@ -116,11 +120,12 @@ async def test_document_service_lifecycle(uow, make_tenant_uow):
         assert exc_info.value.status_code == 409
 
         # Step 3: List documents
-        docs, total = await doc_service.list_by_workspace(
+        docs, next_cursor, has_more = await doc_service.list_by_workspace(
+            tenant_id=tenant.id,
             workspace_id=workspace.id,
-            pagination=PaginationParams(limit=10, offset=0),
+            params=CursorParams(limit=10),
         )
-        assert total == 1
+        assert len(docs) == 1
         assert docs[0].id == document.id
 
         # Step 4: Delete document
@@ -195,4 +200,3 @@ async def test_document_reingest_version_increment(uow, make_tenant_uow):
             == f"tenants/{tenant.id}/documents/{doc.id}/v2/updated.txt"
         )
         assert reingested.status == DocumentStatus.PENDING
-

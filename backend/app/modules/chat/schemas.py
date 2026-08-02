@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,6 +46,11 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class FeedbackRating(StrEnum):
+    UP = "up"
+    DOWN = "down"
+
+
 class ChatMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -62,7 +68,9 @@ class ChatMessageResponse(BaseModel):
 
 
 class ChatMessageFeedbackUpdate(BaseModel):
-    feedback: str = Field(..., description="Feedback rating e.g. 'up' or 'down'")
+    feedback: FeedbackRating = Field(
+        ..., description="Feedback rating e.g. 'up' or 'down'"
+    )
     feedback_note: str | None = Field(
         default=None, max_length=2000, description="Optional feedback explanation note"
     )

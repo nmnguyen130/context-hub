@@ -1,13 +1,13 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.exceptions import ServiceError
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import RefreshToken, User
 from app.modules.auth.schemas import LoginRequest, TokenResponse
-from app.modules.tenant.services import TenantService
+from app.modules.tenant.models import Tenant
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -22,37 +22,35 @@ class AuthService:
 
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
-        self.tenant_service = TenantService(uow)
 
     async def login(self, data: LoginRequest, tenant_slug: str) -> TokenResponse:
         """Authenticate a user, update last login timestamp, and issue JWT tokens."""
-        # 1. Resolve Tenant
-        tenant = await self.tenant_service.get_by_slug(tenant_slug)
-        if not tenant or not tenant.is_active:
-            raise ServiceError(
-                "Incorrect email, password, or tenant slug", status_code=401
-            )
+        clean_email = data.email.strip().lower()
+        clean_slug = tenant_slug.strip().lower()
 
-        # 2. Resolve User within the resolved tenant
-        user = await self.uow.session.scalar(
-            select(User).where(
-                User.email == data.email.strip().lower(),
-                User.tenant_id == tenant.id,
+        tenant = await self.uow.session.scalar(
+            select(Tenant).where(
+                Tenant.slug == clean_slug,
+                Tenant.is_active.is_(True),
             )
         )
-        if (
-            not user
-            or not verify_password(data.password, user.hashed_password)
-            or not user.is_active
-        ):
-            raise ServiceError(
-                "Incorrect email, password, or tenant slug", status_code=401
-            )
+        if not tenant:
+            raise ServiceError.unauthorized("Incorrect email, password, or tenant slug")
 
-        # 3. Update last login timestamp
+        user = await self.uow.session.scalar(
+            select(User).where(
+                User.tenant_id == tenant.id,
+                User.email == clean_email,
+                User.is_active.is_(True),
+            )
+        )
+        if not user:
+            raise ServiceError.unauthorized("Incorrect email, password, or tenant slug")
+        if not verify_password(data.password, user.hashed_password):
+            raise ServiceError.unauthorized("Incorrect email, password, or tenant slug")
+
         user.last_login_at = datetime.now(UTC)
 
-        # 4. Generate JWT tokens
         access_token = create_access_token(
             user.id, user.tenant_id, user.role, plan=tenant.plan_tier
         )
@@ -60,7 +58,6 @@ class AuthService:
             user.id, user.tenant_id
         )
 
-        # 5. Persist refresh token session
         refresh = RefreshToken(
             tenant_id=user.tenant_id,
             user_id=user.id,
@@ -80,42 +77,31 @@ class AuthService:
         try:
             payload = decode_token(refresh_token_str, expected_type="refresh")
         except Exception:
-            raise ServiceError("Invalid or expired refresh token", status_code=401)
+            raise ServiceError.unauthorized("Invalid or expired refresh token")
 
         user_id = UUID(payload["sub"])
         tenant_id = UUID(payload["tenant_id"])
         token_hash = hash_token(refresh_token_str)
 
-        # Retrieve active stored token
-        stored_token = await self.uow.session.scalar(
-            select(RefreshToken).where(
-                RefreshToken.token_hash == token_hash,
-                RefreshToken.tenant_id == tenant_id,
-                RefreshToken.revoked_at.is_(None),
-            )
+        stmt = select(RefreshToken).where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.tenant_id == tenant_id,
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > func.now(),
         )
-        if not stored_token or stored_token.user_id != user_id:
-            raise ServiceError("Invalid or expired refresh token", status_code=401)
+        stored_token = await self.uow.session.scalar(stmt)
+        if not stored_token:
+            raise ServiceError.unauthorized("Invalid or expired refresh token")
 
-        if stored_token.expires_at < datetime.now(UTC):
-            raise ServiceError("Refresh token has expired", status_code=401)
-
-        # Get User details
         user = await self.uow.session.get(User, user_id)
-        if not user or not user.is_active or user.tenant_id != tenant_id:
-            raise ServiceError("User account is inactive or not found", status_code=401)
+        tenant = await self.uow.session.get(Tenant, tenant_id)
 
-        # Get Tenant details to check active status and get plan_tier
-        tenant = await self.tenant_service.get_by_id(user.tenant_id)
-        if not tenant or not tenant.is_active or tenant.id != tenant_id:
-            raise ServiceError(
-                "Tenant organization is inactive or not found", status_code=401
-            )
+        if not user.is_active or not tenant.is_active:
+            raise ServiceError.unauthorized("Account or organization is inactive")
 
-        # Revoke old refresh token
         stored_token.revoked_at = datetime.now(UTC)
 
-        # Issue new token pair
         access_token = create_access_token(
             user.id, user.tenant_id, user.role, plan=tenant.plan_tier
         )
@@ -136,27 +122,28 @@ class AuthService:
         )
 
     async def logout(self, refresh_token_str: str) -> None:
-        """Revoke an active refresh token session, marking it as logged out."""
+        """Revoke an active refresh token session."""
         try:
             payload = decode_token(refresh_token_str, expected_type="refresh")
             tenant_id = UUID(payload["tenant_id"])
         except Exception:
-            raise ServiceError("Invalid refresh token", status_code=400)
+            raise ServiceError.bad_request("Invalid refresh token")
 
         token_hash = hash_token(refresh_token_str)
-        token = await self.uow.session.scalar(
-            select(RefreshToken).where(
+        stmt = (
+            update(RefreshToken)
+            .where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.tenant_id == tenant_id,
                 RefreshToken.revoked_at.is_(None),
             )
+            .values(revoked_at=datetime.now(UTC))
         )
-        if token:
-            token.revoked_at = datetime.now(UTC)
-            await self.uow.flush()
+        await self.uow.session.execute(stmt)
+        await self.uow.flush()
 
     async def logout_all(self, tenant_id: UUID, user_id: UUID) -> int:
-        """Revoke all active refresh token sessions for a specific user within a tenant."""
+        """Revoke all active refresh token sessions for a user within a tenant."""
         stmt = (
             update(RefreshToken)
             .where(

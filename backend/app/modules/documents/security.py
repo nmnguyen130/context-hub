@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.modules.documents.exceptions import DLPViolation
+from app.core.exceptions import ServiceError
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,6 @@ class DLPScanner:
         return sorted(matches, key=lambda m: m.start)
 
 
-# Module-level default scanner singleton to avoid repetitive class instantiation
 _DEFAULT_SCANNER = DLPScanner()
 
 
@@ -137,7 +136,7 @@ def apply_dlp(
     warnings = [f"DLP match: {m.pattern_name} ({m.severity})" for m in matches]
 
     if action == "REJECT":
-        raise DLPViolation(
+        raise ServiceError.unprocessable(
             f"Content rejected: {matches[0].pattern_name} pattern detected."
         )
 
@@ -145,5 +144,4 @@ def apply_dlp(
         masked, vault = mask_pii(text, matches)
         return masked, warnings, vault
 
-    # Default/Fallback to LOG_ONLY: return original text with warnings, empty vault
     return text, warnings, {}

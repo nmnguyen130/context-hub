@@ -1,10 +1,16 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
-from app.api.dependencies import get_authenticated_context, get_service, require_roles
+from app.api.dependencies import (
+    get_authenticated_context,
+    get_service,
+    get_storage,
+    require_roles,
+)
 from app.core.context import RequestContext, UserRole
-from app.core.pagination import PaginatedResponse, PaginationParams
+from app.core.pagination import CursorPage, CursorParams
+from app.infrastructure.storage import StorageProvider
 from app.modules.documents.schemas import (
     DocumentResponse,
     DocumentUploadResponse,
@@ -37,22 +43,26 @@ workspaces_router = APIRouter(
 )
 async def create_workspace(
     data: WorkspaceCreate,
+    context: RequestContext = Depends(get_authenticated_context),
     service: WorkspaceService = Depends(get_service(WorkspaceService)),
 ):
     """Create a new workspace for the current tenant."""
-    workspace = await service.create(data)
+    workspace = await service.create(context.tenant_id, data)
     await service.uow.commit()
     return workspace
 
 
-@workspaces_router.get("", response_model=PaginatedResponse[WorkspaceResponse])
+@workspaces_router.get("", response_model=CursorPage[WorkspaceResponse])
 async def list_workspaces(
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
+    context: RequestContext = Depends(get_authenticated_context),
     service: WorkspaceService = Depends(get_service(WorkspaceService)),
 ):
     """List all active workspaces for the current tenant with pagination."""
-    items, total = await service.list(pagination)
-    return PaginatedResponse.create(items, total, pagination)
+    items, next_cursor, has_more = await service.list(context.tenant_id, params)
+    return CursorPage[WorkspaceResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
+    )
 
 
 @workspaces_router.get("/{workspace_id}", response_model=WorkspaceResponse)
@@ -90,8 +100,8 @@ async def update_workspace(
 )
 async def upload_document(
     workspace_id: uuid.UUID,
-    request: Request,
     file: UploadFile = File(...),
+    storage: StorageProvider = Depends(get_storage),
     context: RequestContext = Depends(get_authenticated_context),
     service: DocumentService = Depends(get_service(DocumentService)),
 ):
@@ -102,7 +112,7 @@ async def upload_document(
         filename=file.filename or "upload.bin",
         content=content,
         content_type=file.content_type,
-        storage=request.app.state.storage,
+        storage=storage,
         context=context,
     )
     await service.uow.commit()
@@ -111,16 +121,21 @@ async def upload_document(
 
 @documents_router.get(
     "/workspace/{workspace_id}",
-    response_model=PaginatedResponse[DocumentResponse],
+    response_model=CursorPage[DocumentResponse],
 )
 async def list_documents(
     workspace_id: uuid.UUID,
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
+    context: RequestContext = Depends(get_authenticated_context),
     service: DocumentService = Depends(get_service(DocumentService)),
 ):
     """List all documents belonging to a workspace with pagination."""
-    items, total = await service.list_by_workspace(workspace_id, pagination)
-    return PaginatedResponse.create(items, total, pagination)
+    items, next_cursor, has_more = await service.list_by_workspace(
+        context.tenant_id, workspace_id, params
+    )
+    return CursorPage[DocumentResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
+    )
 
 
 @documents_router.get("/{document_id}", response_model=DocumentResponse)
@@ -138,8 +153,8 @@ async def get_document(
 )
 async def reingest_document(
     document_id: uuid.UUID,
-    request: Request,
     file: UploadFile = File(...),
+    storage: StorageProvider = Depends(get_storage),
     context: RequestContext = Depends(get_authenticated_context),
     service: DocumentService = Depends(get_service(DocumentService)),
 ):
@@ -150,7 +165,7 @@ async def reingest_document(
         filename=file.filename or "reingest.bin",
         content=content,
         content_type=file.content_type,
-        storage=request.app.state.storage,
+        storage=storage,
         context=context,
     )
     await service.uow.commit()
@@ -167,9 +182,9 @@ async def reingest_document(
 )
 async def delete_document(
     document_id: uuid.UUID,
-    request: Request,
+    storage: StorageProvider = Depends(get_storage),
     service: DocumentService = Depends(get_service(DocumentService)),
 ):
     """Delete a document and its parsed chunks from the database and storage."""
-    await service.delete(document_id, request.app.state.storage)
+    await service.delete(document_id, storage)
     await service.uow.commit()

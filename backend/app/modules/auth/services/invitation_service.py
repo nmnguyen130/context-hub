@@ -3,12 +3,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import jwt
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.context import UserRole
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams, paginate_cursor
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import Invitation, InvitationStatus, User
 from app.modules.auth.schemas import InvitationCreate
@@ -48,54 +48,46 @@ class InvitationService:
         acting_user_role: UserRole,
         expires_in_days: int = 7,
     ) -> tuple[Invitation, str]:
-        """Create a new invitation for a user to join a tenant organization."""
-        # Enforce target role limit: acting user cannot invite a user with higher authority than their own
+        """Create a new invitation for a user to join a tenant organization with a clean, single flow."""
         if data.role.priority > acting_user_role.priority:
-            raise ServiceError(
-                "Cannot invite a user with higher authority than your own",
-                status_code=403,
+            raise ServiceError.forbidden(
+                "Cannot invite a user with higher authority than your own"
             )
 
-        # 1. Assert user doesn't already exist in the organization
-        existing_user = await self.uow.session.scalar(
-            select(User).where(
+        clean_email = data.email.strip().lower()
+
+        user_exists = await self.uow.session.scalar(
+            select(User.id).where(
                 User.tenant_id == tenant_id,
-                User.email == data.email.strip().lower(),
+                User.email == clean_email,
             )
         )
-        if existing_user:
-            raise ServiceError(
-                "User with this email is already a member", status_code=409
-            )
+        if user_exists:
+            raise ServiceError.conflict("User with this email is already a member")
 
-        # 2. Assert no other active pending invitation exists
         pending = await self.uow.session.scalar(
             select(Invitation).where(
                 Invitation.tenant_id == tenant_id,
-                Invitation.email == data.email.strip().lower(),
+                Invitation.email == clean_email,
                 Invitation.status == InvitationStatus.PENDING,
             )
         )
         if pending:
             if pending.expires_at >= datetime.now(UTC):
-                raise ServiceError(
-                    "A pending invitation already exists", status_code=409
-                )
-            # Auto-expire outdated pending invitation
+                raise ServiceError.conflict("A pending invitation already exists")
             pending.status = InvitationStatus.EXPIRED
-            await self.uow.flush()
 
         invitation_id = uuid.uuid4()
         expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
         token = self._create_invitation_token(
-            invitation_id, tenant_id, data.email, data.role, expires_at
+            invitation_id, tenant_id, clean_email, data.role, expires_at
         )
 
         invitation = Invitation(
             id=invitation_id,
             tenant_id=tenant_id,
             invited_by=invited_by,
-            email=data.email.strip().lower(),
+            email=clean_email,
             role=data.role,
             status=InvitationStatus.PENDING,
             token_hash=hash_token(token),
@@ -109,33 +101,34 @@ class InvitationService:
         self,
         tenant_id: UUID,
         status: InvitationStatus | None = None,
-        pagination: PaginationParams | None = None,
-    ) -> tuple[list[Invitation], int]:
-        """List invitations for a tenant, optionally filtered by status, with pagination."""
-        pagination = pagination or PaginationParams()
+        params: CursorParams | None = None,
+    ) -> tuple[list[Invitation], str | None, bool]:
+        """List invitations for a tenant with cursor pagination."""
+        params = params or CursorParams()
         stmt = select(Invitation).where(Invitation.tenant_id == tenant_id)
         if status:
             stmt = stmt.where(Invitation.status == status)
 
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total = await self.uow.session.scalar(count_stmt) or 0
-
-        paginated = stmt.offset(pagination.offset).limit(pagination.limit)
-        result = await self.uow.session.scalars(paginated)
-        return list(result.all()), total
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=Invitation.created_at,
+            id_column=Invitation.id,
+        )
 
     async def get_invitation_by_id(self, invitation_id: UUID) -> Invitation:
         """Retrieve an invitation by ID."""
         invitation = await self.uow.session.get(Invitation, invitation_id)
         if not invitation:
-            raise ServiceError("Invitation not found", status_code=404)
+            raise ServiceError.not_found("Invitation")
         return invitation
 
     async def revoke_invitation(self, invitation_id: UUID) -> None:
         """Revoke a pending invitation."""
         invitation = await self.get_invitation_by_id(invitation_id)
         if invitation.status != InvitationStatus.PENDING:
-            raise ServiceError("Cannot revoke this invitation", status_code=400)
+            raise ServiceError.bad_request("Cannot revoke this invitation")
 
         invitation.status = InvitationStatus.REVOKED
         await self.uow.flush()
@@ -150,7 +143,7 @@ class InvitationService:
         """Regenerate a fresh token and extend expiry for an existing invitation."""
         invitation = await self.get_invitation_by_id(invitation_id)
         if invitation.status != InvitationStatus.PENDING:
-            raise ServiceError("Cannot resend this invitation", status_code=400)
+            raise ServiceError.bad_request("Cannot resend this invitation")
 
         expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
         token = self._create_invitation_token(

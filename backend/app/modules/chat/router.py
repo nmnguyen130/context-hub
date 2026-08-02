@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies import get_authenticated_context, get_service
 from app.core.context import RequestContext
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginatedResponse, PaginationParams
+from app.core.pagination import CursorPage, CursorParams
 from app.infrastructure.rate_limiter import PlanPolicyProvider, RateLimiter
 from app.modules.chat.memory import ChatSessionService
 from app.modules.chat.schemas import (
@@ -91,26 +91,32 @@ async def stream_chat(
 )
 async def create_session(
     data: ChatSessionCreate,
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """Create a new chat session in a workspace."""
-    session = await service.create(data)
+    session = await service.create(context.tenant_id, context.user_id, data)
     await service.uow.commit()
     return session
 
 
 @chat_router.get(
     "/sessions/workspace/{workspace_id}",
-    response_model=PaginatedResponse[ChatSessionResponse],
+    response_model=CursorPage[ChatSessionResponse],
 )
 async def list_sessions(
     workspace_id: uuid.UUID,
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
-    """List all chat sessions in a workspace for the current user."""
-    items, total = await service.list_by_workspace(workspace_id, pagination)
-    return PaginatedResponse.create(items, total, pagination)
+    """List all chat sessions in a workspace for the current user with pagination."""
+    items, next_cursor, has_more = await service.list_by_workspace(
+        context.tenant_id, context.user_id, workspace_id, params
+    )
+    return CursorPage[ChatSessionResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
+    )
 
 
 @chat_router.get(
@@ -119,10 +125,11 @@ async def list_sessions(
 )
 async def get_session(
     session_id: uuid.UUID,
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """Retrieve a single chat session by ID."""
-    return await service.get(session_id)
+    return await service.get(context.tenant_id, session_id, user_id=context.user_id)
 
 
 @chat_router.patch(
@@ -132,10 +139,11 @@ async def get_session(
 async def update_session(
     session_id: uuid.UUID,
     data: ChatSessionUpdate,
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """Update a chat session title."""
-    session = await service.update(session_id, data)
+    session = await service.update(context.tenant_id, session_id, data)
     await service.uow.commit()
     return session
 
@@ -146,25 +154,31 @@ async def update_session(
 )
 async def delete_session(
     session_id: uuid.UUID,
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """Delete a chat session and all its messages."""
-    await service.delete(session_id)
+    await service.delete(context.tenant_id, session_id)
     await service.uow.commit()
 
 
 @chat_router.get(
     "/sessions/{session_id}/messages",
-    response_model=PaginatedResponse[ChatMessageResponse],
+    response_model=CursorPage[ChatMessageResponse],
 )
 async def list_messages(
     session_id: uuid.UUID,
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """List message history for a chat session with pagination."""
-    items, total = await service.list_messages(session_id, pagination)
-    return PaginatedResponse.create(items, total, pagination)
+    items, next_cursor, has_more = await service.list_messages(
+        context.tenant_id, session_id, params
+    )
+    return CursorPage[ChatMessageResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
+    )
 
 
 @chat_router.post(
@@ -174,11 +188,15 @@ async def list_messages(
 async def set_message_feedback(
     message_id: uuid.UUID,
     data: ChatMessageFeedbackUpdate,
+    context: RequestContext = Depends(get_authenticated_context),
     service: ChatSessionService = Depends(get_service(ChatSessionService)),
 ):
     """Set thumbs-up/down feedback rating and optional note for a message."""
     message = await service.set_message_feedback(
-        message_id, feedback=data.feedback, feedback_note=data.feedback_note
+        context.tenant_id,
+        message_id,
+        feedback=data.feedback,
+        feedback_note=data.feedback_note,
     )
     await service.uow.commit()
     return message

@@ -1,43 +1,40 @@
 import hashlib
 import io
-import re
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.context import RequestContext, try_current_context
+from app.core.context import RequestContext
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams, paginate_cursor
 from app.core.uow import UnitOfWork
 from app.infrastructure.storage import StorageProvider
 from app.modules.documents.models import Document, DocumentStatus, Workspace
-from app.modules.documents.parsers import EXTENSION_MIME, detect_mime_type
+from app.modules.documents.parsers import detect_mime_type
 from app.modules.documents.schemas import WorkspaceCreate, WorkspaceUpdate
+from app.modules.tenant.services.tenant_service import generate_slug
 
 
 class WorkspaceService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def create(self, data: WorkspaceCreate) -> Workspace:
+    async def create(self, tenant_id: uuid.UUID, data: WorkspaceCreate) -> Workspace:
         """Create a new workspace for the tenant, generating a slug if not provided."""
-        slug = data.slug or self._generate_slug(data.name)
-        ctx = try_current_context()
-        if not ctx or not ctx.tenant_id:
-            raise ServiceError("Tenant context required", status_code=400)
+        slug = data.slug or generate_slug(data.name, fallback="workspace")
 
         existing = await self.uow.session.scalar(
             select(Workspace).where(
-                Workspace.tenant_id == ctx.tenant_id,
+                Workspace.tenant_id == tenant_id,
                 Workspace.slug == slug,
             )
         )
         if existing:
-            raise ServiceError("Workspace slug already exists.", status_code=409)
+            raise ServiceError.conflict("Workspace slug already exists.")
 
         workspace = Workspace(
-            tenant_id=ctx.tenant_id,
+            tenant_id=tenant_id,
             name=data.name.strip(),
             slug=slug,
             description=data.description,
@@ -48,40 +45,33 @@ class WorkspaceService:
 
     async def get(self, workspace_id: uuid.UUID) -> Workspace:
         """Retrieve a single workspace by ID."""
-        workspace = await self.uow.session.get(Workspace, workspace_id)
+        workspace = await self.uow.session.scalar(
+            select(Workspace).where(
+                Workspace.id == workspace_id,
+                Workspace.is_active.is_(True),
+            )
+        )
         if workspace is None:
-            raise ServiceError("Workspace not found.", status_code=404)
+            raise ServiceError.not_found("Workspace")
         return workspace
 
     async def list(
-        self, pagination: PaginationParams | None = None
-    ) -> tuple[list[Workspace], int]:
-        """List workspaces for the current tenant with pagination."""
-        pagination = pagination or PaginationParams()
-        ctx = try_current_context()
-        if not ctx or not ctx.tenant_id:
-            raise ServiceError("Tenant context required", status_code=400)
+        self, tenant_id: uuid.UUID, params: CursorParams | None = None
+    ) -> tuple[list[Workspace], str | None, bool]:
+        """List workspaces for the specified tenant with pagination."""
+        params = params or CursorParams()
 
-        stmt = (
-            select(Workspace)
-            .where(
-                Workspace.tenant_id == ctx.tenant_id,
-                Workspace.is_active.is_(True),
-            )
-            .order_by(Workspace.created_at.desc())
+        stmt = select(Workspace).where(
+            Workspace.tenant_id == tenant_id,
+            Workspace.is_active.is_(True),
         )
-        total = (
-            await self.uow.session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=Workspace.created_at,
+            id_column=Workspace.id,
         )
-        items = (
-            await self.uow.session.scalars(
-                stmt.offset(pagination.offset).limit(pagination.limit)
-            )
-        ).all()
-        return list(items), total
 
     async def update(self, workspace_id: uuid.UUID, data: WorkspaceUpdate) -> Workspace:
         """Update workspace fields."""
@@ -90,16 +80,6 @@ class WorkspaceService:
             setattr(workspace, key, value)
         await self.uow.flush()
         return workspace
-
-    @staticmethod
-    def _generate_slug(name: str) -> str:
-        """Generate a URL-safe slug from a workspace name."""
-        slug = re.sub(
-            r"[\s_-]+",
-            "-",
-            re.sub(r"[^\w\s-]", "", name.strip().lower()),
-        ).strip("-")
-        return slug or "workspace"
 
 
 class DocumentService:
@@ -121,22 +101,30 @@ class DocumentService:
         """Validate and upload a document to object storage, then register it in the database."""
         await self._validate_file(filename, content)
 
-        workspace = await self.uow.session.get(Workspace, workspace_id)
-        if workspace is None:
-            raise ServiceError("Workspace not found.", status_code=404)
-
         content_hash = hashlib.sha256(content).hexdigest()
-        duplicate = await self.uow.session.scalar(
-            select(Document).where(
+        stmt = select(
+            Workspace,
+            select(Document.id)
+            .where(
                 Document.tenant_id == context.tenant_id,
                 Document.workspace_id == workspace_id,
                 Document.content_hash == content_hash,
             )
+            .exists()
+            .label("duplicate_exists"),
+        ).where(
+            Workspace.id == workspace_id,
+            Workspace.tenant_id == context.tenant_id,
+            Workspace.is_active.is_(True),
         )
-        if duplicate:
-            raise ServiceError(
-                "Document with identical content already exists.",
-                status_code=409,
+        res = (await self.uow.session.execute(stmt)).first()
+        if res is None:
+            raise ServiceError.not_found("Workspace")
+
+        workspace, duplicate_exists = res._tuple()
+        if duplicate_exists:
+            raise ServiceError.conflict(
+                "Document with identical content already exists."
             )
 
         mime_type = detect_mime_type(filename, content_type)
@@ -176,7 +164,7 @@ class DocumentService:
         """Retrieve a single document by ID."""
         document = await self.uow.session.get(Document, document_id)
         if document is None:
-            raise ServiceError("Document not found.", status_code=404)
+            raise ServiceError.not_found("Document")
         return document
 
     async def reingest(
@@ -193,8 +181,6 @@ class DocumentService:
         await self._validate_file(filename, content)
 
         document = await self.get(document_id)
-        if document.tenant_id != context.tenant_id:
-            raise ServiceError("Document not found.", status_code=404)
 
         content_hash = hashlib.sha256(content).hexdigest()
         mime_type = detect_mime_type(filename, content_type)
@@ -224,42 +210,35 @@ class DocumentService:
 
     async def list_by_workspace(
         self,
+        tenant_id: uuid.UUID,
         workspace_id: uuid.UUID,
-        pagination: PaginationParams | None = None,
-    ) -> tuple[list[Document], int]:
+        params: CursorParams | None = None,
+    ) -> tuple[list[Document], str | None, bool]:
         """List documents belonging to a workspace with pagination."""
-        pagination = pagination or PaginationParams()
-        ctx = try_current_context()
-        if not ctx or not ctx.tenant_id:
-            raise ServiceError("Tenant context required", status_code=400)
+        params = params or CursorParams()
 
-        stmt = (
-            select(Document)
-            .where(
-                Document.tenant_id == ctx.tenant_id,
-                Document.workspace_id == workspace_id,
-            )
-            .order_by(Document.created_at.desc())
+        stmt = select(Document).where(
+            Document.tenant_id == tenant_id,
+            Document.workspace_id == workspace_id,
         )
-        total = (
-            await self.uow.session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=Document.created_at,
+            id_column=Document.id,
         )
-        items = (
-            await self.uow.session.scalars(
-                stmt.offset(pagination.offset).limit(pagination.limit)
-            )
-        ).all()
-        return list(items), total
 
     async def delete(self, document_id: uuid.UUID, storage: StorageProvider) -> None:
         """Delete a document from object storage and the database."""
         document = await self.get(document_id)
-        await storage.delete_file(document.storage_key)
-        if document.extracted_text_key:
-            await storage.delete_file(document.extracted_text_key)
+        keys_to_delete = [document.storage_key]
+        if document.status == DocumentStatus.ACTIVE:
+            keys_to_delete.append(document.extracted_text_key)
+
+        for key in keys_to_delete:
+            await storage.delete_file(key)
+
         await self.uow.session.delete(document)
         await self.uow.flush()
 
@@ -278,6 +257,3 @@ class DocumentService:
                 f"Unsupported file type. Allowed: {', '.join(sorted(self.ALLOWED_EXTENSIONS))}",
                 status_code=415,
             )
-
-        if ext and ext not in EXTENSION_MIME:
-            raise ServiceError("Unsupported file type.", status_code=415)

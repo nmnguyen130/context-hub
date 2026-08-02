@@ -64,6 +64,11 @@ class InvitationResponse(BaseModel):
     created_at: datetime
 
 
+class InvitationCreateResponse(BaseModel):
+    invitation: InvitationResponse
+    invite_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

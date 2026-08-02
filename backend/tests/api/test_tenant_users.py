@@ -102,7 +102,7 @@ async def test_api_tenant_isolation_list(async_client: AsyncClient, db_session):
     data = response.json()
 
     # Tenant A should only see their own user
-    assert data["total"] == 1
+    assert len(data["items"]) == 1
     emails = [item["email"] for item in data["items"]]
     assert "usera@tenant-a.com" in emails
     assert "userb@tenant-b.com" not in emails

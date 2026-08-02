@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: fd847cef86ae
+Revision ID: 191e166a044d
 Revises: None
-Create Date: 2026-07-28 16:13:11.936888
+Create Date: 2026-08-02 14:02:52.737467
 
 """
 # ruff: noqa: F401
@@ -16,7 +16,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'fd847cef86ae'
+revision: str = '191e166a044d'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -48,14 +48,15 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=255), nullable=False),
     sa.Column('slug', sa.String(length=255), nullable=False),
     sa.Column('plan_tier', sa.Enum('FREE', 'PRO', 'ENTERPRISE', name='plantier', native_enum=False), nullable=False),
-    sa.Column('settings', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('settings', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('slug')
     )
     with op.batch_alter_table('tenants', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_tenants_slug'), ['slug'], unique=True)
+        batch_op.create_index('ix_tenants_cursor', ['created_at', 'id'], unique=False)
 
     op.create_table('users',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -69,11 +70,10 @@ def upgrade() -> None:
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('tenant_id', 'email', name='uq_users_email_tenant')
+    sa.UniqueConstraint('tenant_id', 'email', name='uq_users_tenant_email')
     )
     with op.batch_alter_table('users', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_users_email'), ['email'], unique=False)
-        batch_op.create_index(batch_op.f('ix_users_tenant_id'), ['tenant_id'], unique=False)
+        batch_op.create_index('ix_users_cursor', ['tenant_id', 'created_at', 'id'], unique=False)
 
     op.create_table('workspaces',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -87,11 +87,10 @@ def upgrade() -> None:
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('tenant_id', 'slug', name='uq_workspaces_slug_tenant')
+    sa.UniqueConstraint('tenant_id', 'slug', name='uq_workspaces_tenant_slug')
     )
     with op.batch_alter_table('workspaces', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_workspaces_slug'), ['slug'], unique=False)
-        batch_op.create_index(batch_op.f('ix_workspaces_tenant_id'), ['tenant_id'], unique=False)
+        batch_op.create_index('ix_workspaces_cursor', ['tenant_id', 'created_at', 'id'], unique=False)
 
     op.create_table('chat_cache',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -108,9 +107,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('chat_cache', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_chat_cache_tenant_id'), ['tenant_id'], unique=False)
-        batch_op.create_index('ix_chat_cache_workspace', ['tenant_id', 'workspace_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_chat_cache_workspace_id'), ['workspace_id'], unique=False)
+        batch_op.create_index('ix_chat_cache_embedding_hnsw', ['query_embedding'], unique=False, postgresql_using='hnsw', postgresql_ops={'query_embedding': 'vector_cosine_ops'}, postgresql_with={'m': 16, 'ef_construction': 200})
+        batch_op.create_index('ix_chat_cache_workspace_expiry', ['workspace_id', 'expires_at'], unique=False)
 
     op.create_table('chat_sessions',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -120,7 +118,7 @@ def upgrade() -> None:
     sa.Column('running_summary', sa.Text(), nullable=True),
     sa.Column('message_count', sa.Integer(), nullable=False),
     sa.Column('total_tokens', sa.Integer(), nullable=False),
-    sa.Column('total_cost_usd', sa.Float(), nullable=False),
+    sa.Column('total_cost_usd', sa.Numeric(precision=12, scale=6), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
@@ -129,10 +127,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('chat_sessions', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_chat_sessions_tenant_id'), ['tenant_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_chat_sessions_user_id'), ['user_id'], unique=False)
-        batch_op.create_index('ix_chat_sessions_user_workspace', ['tenant_id', 'user_id', 'workspace_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_chat_sessions_workspace_id'), ['workspace_id'], unique=False)
+        batch_op.create_index('ix_chat_sessions_cursor', ['workspace_id', 'user_id', 'updated_at', 'id'], unique=False)
 
     op.create_table('documents',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -142,7 +137,6 @@ def upgrade() -> None:
     sa.Column('file_size', sa.Integer(), nullable=False),
     sa.Column('content_hash', sa.String(length=64), nullable=False),
     sa.Column('storage_key', sa.String(length=1000), nullable=False),
-    sa.Column('extracted_text_key', sa.String(length=1000), nullable=True),
     sa.Column('status', sa.Enum('PENDING', 'PROCESSING', 'ACTIVE', 'ERROR', name='documentstatus', native_enum=False), nullable=False),
     sa.Column('error_message', sa.String(length=500), nullable=True),
     sa.Column('uploaded_by', sa.Uuid(), nullable=True),
@@ -154,13 +148,11 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('tenant_id', 'workspace_id', 'content_hash', name='uq_documents_hash_workspace')
+    sa.UniqueConstraint('tenant_id', 'workspace_id', 'content_hash', name='uq_documents_tenant_workspace_hash')
     )
     with op.batch_alter_table('documents', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_documents_content_hash'), ['content_hash'], unique=False)
-        batch_op.create_index(batch_op.f('ix_documents_status'), ['status'], unique=False)
-        batch_op.create_index(batch_op.f('ix_documents_tenant_id'), ['tenant_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_documents_workspace_id'), ['workspace_id'], unique=False)
+        batch_op.create_index('ix_documents_status_queue', ['status', 'created_at'], unique=False)
+        batch_op.create_index('ix_documents_workspace_cursor', ['tenant_id', 'workspace_id', 'created_at', 'id'], unique=False)
 
     op.create_table('invitations',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -171,7 +163,6 @@ def upgrade() -> None:
     sa.Column('token_hash', sa.String(length=64), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['invited_by'], ['users.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
@@ -179,8 +170,8 @@ def upgrade() -> None:
     sa.UniqueConstraint('token_hash')
     )
     with op.batch_alter_table('invitations', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_invitations_email'), ['email'], unique=False)
-        batch_op.create_index(batch_op.f('ix_invitations_tenant_id'), ['tenant_id'], unique=False)
+        batch_op.create_index('ix_invitations_cursor', ['tenant_id', 'created_at', 'id'], unique=False)
+        batch_op.create_index('ix_invitations_email_status', ['email', 'status'], unique=False)
 
     op.create_table('refresh_tokens',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -188,7 +179,6 @@ def upgrade() -> None:
     sa.Column('token_hash', sa.String(length=64), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
@@ -196,8 +186,8 @@ def upgrade() -> None:
     sa.UniqueConstraint('token_hash')
     )
     with op.batch_alter_table('refresh_tokens', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_refresh_tokens_tenant_id'), ['tenant_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_refresh_tokens_user_id'), ['user_id'], unique=False)
+        batch_op.create_index('ix_refresh_tokens_active', ['user_id'], unique=False, postgresql_where=sa.text('revoked_at IS NULL'))
+        batch_op.create_index('ix_refresh_tokens_expiry', ['expires_at'], unique=False)
 
     op.create_table('chat_messages',
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -205,10 +195,9 @@ def upgrade() -> None:
     sa.Column('role', sa.String(length=20), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
     sa.Column('citations', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('retrieved_chunks', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('confidence_score', sa.Float(), nullable=True),
     sa.Column('token_count', sa.Integer(), nullable=False),
-    sa.Column('cost_usd', sa.Float(), nullable=False),
+    sa.Column('cost_usd', sa.Numeric(precision=12, scale=6), nullable=False),
     sa.Column('feedback', sa.String(length=20), nullable=True),
     sa.Column('feedback_note', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -218,16 +207,13 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('chat_messages', schema=None) as batch_op:
-        batch_op.create_index('ix_chat_messages_session_created', ['session_id', 'created_at'], unique=False)
-        batch_op.create_index(batch_op.f('ix_chat_messages_session_id'), ['session_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_chat_messages_tenant_id'), ['tenant_id'], unique=False)
+        batch_op.create_index('ix_chat_messages_session_cursor', ['session_id', 'created_at', 'id'], unique=False)
 
     op.create_table('document_chunks',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('document_id', sa.Uuid(), nullable=False),
     sa.Column('workspace_id', sa.Uuid(), nullable=False),
     sa.Column('chunk_index', sa.Integer(), nullable=False),
-    sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
     sa.Column('token_count', sa.Integer(), nullable=False),
     sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=768), nullable=True),
@@ -239,99 +225,64 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['document_id'], ['documents.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('document_id', 'version', 'chunk_index', name='uq_document_chunks_version_index')
+    sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('document_chunks', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_document_chunks_document_id'), ['document_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_document_chunks_is_active'), ['is_active'], unique=False)
-        batch_op.create_index(batch_op.f('ix_document_chunks_tenant_id'), ['tenant_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_document_chunks_workspace_id'), ['workspace_id'], unique=False)
-
-    op.execute(
-        """
-        CREATE INDEX idx_chunks_embedding_hnsw ON document_chunks
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 200);
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX idx_chunks_fts ON document_chunks
-        USING GIN (search_vector);
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX idx_chat_cache_embedding_hnsw ON chat_cache
-        USING hnsw (query_embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 200);
-        """
-    )
+        batch_op.create_index('ix_chunks_document_order', ['document_id', 'chunk_index'], unique=False)
+        batch_op.create_index('ix_chunks_embedding_hnsw', ['embedding'], unique=False, postgresql_using='hnsw', postgresql_ops={'embedding': 'vector_cosine_ops'}, postgresql_with={'m': 16, 'ef_construction': 200}, postgresql_where=sa.text('embedding IS NOT NULL AND is_active = true'))
+        batch_op.create_index('ix_chunks_search_vector_gin', ['search_vector'], unique=False, postgresql_using='gin')
+        batch_op.create_index('uq_chunks_active_index', ['document_id', 'chunk_index'], unique=True, postgresql_where=sa.text('is_active = true'))
 
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_chat_cache_embedding_hnsw;")
-    op.execute("DROP INDEX IF EXISTS idx_chunks_fts;")
-    op.execute("DROP INDEX IF EXISTS idx_chunks_embedding_hnsw;")
     # ### commands auto generated by Alembic - please adjust! ###
     with op.batch_alter_table('document_chunks', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_document_chunks_workspace_id'))
-        batch_op.drop_index(batch_op.f('ix_document_chunks_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_document_chunks_is_active'))
-        batch_op.drop_index(batch_op.f('ix_document_chunks_document_id'))
+        batch_op.drop_index('uq_chunks_active_index', postgresql_where=sa.text('is_active = true'))
+        batch_op.drop_index('ix_chunks_search_vector_gin', postgresql_using='gin')
+        batch_op.drop_index('ix_chunks_embedding_hnsw', postgresql_using='hnsw', postgresql_ops={'embedding': 'vector_cosine_ops'}, postgresql_with={'m': 16, 'ef_construction': 200}, postgresql_where=sa.text('embedding IS NOT NULL AND is_active = true'))
+        batch_op.drop_index('ix_chunks_document_order')
 
     op.drop_table('document_chunks')
     with op.batch_alter_table('chat_messages', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_chat_messages_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_chat_messages_session_id'))
-        batch_op.drop_index('ix_chat_messages_session_created')
+        batch_op.drop_index('ix_chat_messages_session_cursor')
 
     op.drop_table('chat_messages')
     with op.batch_alter_table('refresh_tokens', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_refresh_tokens_user_id'))
-        batch_op.drop_index(batch_op.f('ix_refresh_tokens_tenant_id'))
+        batch_op.drop_index('ix_refresh_tokens_expiry')
+        batch_op.drop_index('ix_refresh_tokens_active', postgresql_where=sa.text('revoked_at IS NULL'))
 
     op.drop_table('refresh_tokens')
     with op.batch_alter_table('invitations', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_invitations_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_invitations_email'))
+        batch_op.drop_index('ix_invitations_email_status')
+        batch_op.drop_index('ix_invitations_cursor')
 
     op.drop_table('invitations')
     with op.batch_alter_table('documents', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_documents_workspace_id'))
-        batch_op.drop_index(batch_op.f('ix_documents_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_documents_status'))
-        batch_op.drop_index(batch_op.f('ix_documents_content_hash'))
+        batch_op.drop_index('ix_documents_workspace_cursor')
+        batch_op.drop_index('ix_documents_status_queue')
 
     op.drop_table('documents')
     with op.batch_alter_table('chat_sessions', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_chat_sessions_workspace_id'))
-        batch_op.drop_index('ix_chat_sessions_user_workspace')
-        batch_op.drop_index(batch_op.f('ix_chat_sessions_user_id'))
-        batch_op.drop_index(batch_op.f('ix_chat_sessions_tenant_id'))
+        batch_op.drop_index('ix_chat_sessions_cursor')
 
     op.drop_table('chat_sessions')
     with op.batch_alter_table('chat_cache', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_chat_cache_workspace_id'))
-        batch_op.drop_index('ix_chat_cache_workspace')
-        batch_op.drop_index(batch_op.f('ix_chat_cache_tenant_id'))
+        batch_op.drop_index('ix_chat_cache_workspace_expiry')
+        batch_op.drop_index('ix_chat_cache_embedding_hnsw', postgresql_using='hnsw', postgresql_ops={'query_embedding': 'vector_cosine_ops'}, postgresql_with={'m': 16, 'ef_construction': 200})
 
     op.drop_table('chat_cache')
     with op.batch_alter_table('workspaces', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_workspaces_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_workspaces_slug'))
+        batch_op.drop_index('ix_workspaces_cursor')
 
     op.drop_table('workspaces')
     with op.batch_alter_table('users', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_users_tenant_id'))
-        batch_op.drop_index(batch_op.f('ix_users_email'))
+        batch_op.drop_index('ix_users_cursor')
 
     op.drop_table('users')
     with op.batch_alter_table('tenants', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_tenants_slug'))
+        batch_op.drop_index('ix_tenants_cursor')
 
     op.drop_table('tenants')
     with op.batch_alter_table('event_outbox', schema=None) as batch_op:

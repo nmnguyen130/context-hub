@@ -17,6 +17,30 @@ class ServiceError(Exception):
         self.status_code = status_code
         super().__init__(detail)
 
+    @classmethod
+    def not_found(cls, resource: str = "Resource") -> "ServiceError":
+        return cls(f"{resource} not found", status_code=status.HTTP_404_NOT_FOUND)
+
+    @classmethod
+    def conflict(cls, detail: str) -> "ServiceError":
+        return cls(detail, status_code=status.HTTP_409_CONFLICT)
+
+    @classmethod
+    def forbidden(cls, detail: str = "Insufficient permissions") -> "ServiceError":
+        return cls(detail, status_code=status.HTTP_403_FORBIDDEN)
+
+    @classmethod
+    def unauthorized(cls, detail: str = "Invalid credentials") -> "ServiceError":
+        return cls(detail, status_code=status.HTTP_401_UNAUTHORIZED)
+
+    @classmethod
+    def bad_request(cls, detail: str) -> "ServiceError":
+        return cls(detail, status_code=status.HTTP_400_BAD_REQUEST)
+
+    @classmethod
+    def unprocessable(cls, detail: str) -> "ServiceError":
+        return cls(detail, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Registers global exception handlers for the FastAPI application."""

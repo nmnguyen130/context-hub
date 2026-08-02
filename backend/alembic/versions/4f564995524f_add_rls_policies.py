@@ -1,7 +1,7 @@
 """add_rls_policies
 
 Revision ID: 4f564995524f
-Revises: fd847cef86ae
+Revises: 191e166a044d
 Create Date: 2026-07-27 13:12:00.000000
 
 """
@@ -10,7 +10,7 @@ from typing import Sequence
 from alembic import op
 
 revision: str = "4f564995524f"
-down_revision: str | None = "fd847cef86ae"
+down_revision: str | None = "191e166a044d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

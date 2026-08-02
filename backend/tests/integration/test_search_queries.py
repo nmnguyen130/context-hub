@@ -272,4 +272,3 @@ async def test_document_scope_filtering(uow, make_tenant_uow):
         )
         assert len(scoped_sparse) == 1
         assert scoped_sparse[0].id == chunk_doc2.id
-

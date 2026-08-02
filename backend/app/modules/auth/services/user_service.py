@@ -5,7 +5,7 @@ from sqlalchemy import func, select, update
 
 from app.core.context import UserRole
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams, paginate_cursor
 from app.core.uow import UnitOfWork
 from app.modules.auth.models import RefreshToken, User
 from app.modules.auth.schemas import ChangePasswordRequest, UserUpdate
@@ -18,15 +18,8 @@ class UserService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def _count_active_admins(self, tenant_id: UUID) -> int:
-        stmt = select(func.count(User.id)).where(
-            User.tenant_id == tenant_id,
-            User.role == UserRole.ADMIN,
-            User.is_active.is_(True),
-        )
-        return await self.uow.session.scalar(stmt) or 0
-
     async def _revoke_sessions(self, user_id: UUID, tenant_id: UUID) -> None:
+        """Revoke all active refresh token sessions for a user within a tenant."""
         stmt = (
             update(RefreshToken)
             .where(
@@ -38,30 +31,39 @@ class UserService:
         )
         await self.uow.session.execute(stmt)
 
+    async def _count_active_admins(self, tenant_id: UUID) -> int:
+        stmt = select(func.count(User.id)).where(
+            User.tenant_id == tenant_id,
+            User.role == UserRole.ADMIN,
+            User.is_active.is_(True),
+        )
+        return await self.uow.session.scalar(stmt) or 0
+
     async def list_users(
         self,
         tenant_id: UUID,
-        pagination: PaginationParams | None = None,
+        params: CursorParams | None = None,
         is_active: bool | None = None,
-    ) -> tuple[list[User], int]:
+    ) -> tuple[list[User], str | None, bool]:
         """List users belonging to a tenant organization with pagination."""
-        pagination = pagination or PaginationParams()
+        params = params or CursorParams()
         stmt = select(User).where(User.tenant_id == tenant_id)
         if is_active is not None:
             stmt = stmt.where(User.is_active == is_active)
 
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total = await self.uow.session.scalar(count_stmt) or 0
-
-        paginated = stmt.offset(pagination.offset).limit(pagination.limit)
-        items = (await self.uow.session.scalars(paginated)).all()
-        return list(items), total
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=User.created_at,
+            id_column=User.id,
+        )
 
     async def get_user(self, user_id: UUID) -> User:
         """Retrieve a single user, raising 404 if not found."""
         user = await self.uow.session.get(User, user_id)
         if not user:
-            raise ServiceError("User not found", status_code=404)
+            raise ServiceError.not_found("User")
         return user
 
     async def update_role(
@@ -73,28 +75,23 @@ class UserService:
     ) -> User:
         """Modify a user's role, enforcing role hierarchy and self-modification blocks."""
         if target_user_id == acting_user_id:
-            raise ServiceError("Admins cannot modify their own roles", status_code=400)
+            raise ServiceError.bad_request("Admins cannot modify their own roles")
 
         user = await self.get_user(target_user_id)
 
-        # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError(
-                "Cannot modify a user with equal or higher authority", status_code=403
+            raise ServiceError.forbidden(
+                "Cannot modify a user with equal or higher authority"
             )
 
-        # Enforce target role limit: acting user cannot assign a role higher than their own
         if data.role.priority > acting_user_role.priority:
-            raise ServiceError(
-                "Cannot assign a role higher than your own", status_code=403
-            )
+            raise ServiceError.forbidden("Cannot assign a role higher than your own")
 
         if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
             admin_count = await self._count_active_admins(user.tenant_id)
             if admin_count <= 1:
-                raise ServiceError(
-                    "Cannot demote the only remaining active Administrator",
-                    status_code=400,
+                raise ServiceError.bad_request(
+                    "Cannot demote the only remaining active Administrator"
                 )
 
         user.role = data.role
@@ -106,7 +103,7 @@ class UserService:
         user = await self.get_user(user_id)
 
         if not verify_password(data.current_password, user.hashed_password):
-            raise ServiceError("Incorrect current password", status_code=400)
+            raise ServiceError.bad_request("Incorrect current password")
 
         user.hashed_password = hash_password(data.new_password)
         await self._revoke_sessions(user_id, user.tenant_id)
@@ -120,27 +117,24 @@ class UserService:
     ) -> None:
         """Deactivate a user's account and revoke their active sessions, enforcing role hierarchy."""
         if user_id == acting_user_id:
-            raise ServiceError(
-                "Admins cannot deactivate their own accounts", status_code=400
+            raise ServiceError.bad_request(
+                "Admins cannot deactivate their own accounts"
             )
 
         user = await self.get_user(user_id)
         if not user.is_active:
             return
 
-        # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError(
-                "Cannot deactivate a user with equal or higher authority",
-                status_code=403,
+            raise ServiceError.forbidden(
+                "Cannot deactivate a user with equal or higher authority"
             )
 
         if user.role == UserRole.ADMIN:
             admin_count = await self._count_active_admins(user.tenant_id)
             if admin_count <= 1:
-                raise ServiceError(
-                    "Cannot deactivate the only remaining active Administrator",
-                    status_code=400,
+                raise ServiceError.bad_request(
+                    "Cannot deactivate the only remaining active Administrator"
                 )
 
         user.is_active = False
@@ -157,11 +151,9 @@ class UserService:
         if user.is_active:
             return
 
-        # Enforce role hierarchy: acting user must be higher authority than target user
         if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError(
-                "Cannot reactivate a user with equal or higher authority",
-                status_code=403,
+            raise ServiceError.forbidden(
+                "Cannot reactivate a user with equal or higher authority"
             )
 
         user.is_active = True

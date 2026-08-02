@@ -50,6 +50,5 @@ class TenantBaseModel(Base):
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"),
-        index=True,
         nullable=False,
     )

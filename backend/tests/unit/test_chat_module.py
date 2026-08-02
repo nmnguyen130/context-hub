@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.modules.chat.cache.semantic_cache import SemanticCache, cosine_similarity
+from app.modules.chat.cache.semantic_cache import SemanticCache
 from app.modules.chat.generation.citations import extract_citations
 from app.modules.chat.generation.prompts import build_grounded_prompt
 from app.modules.chat.query.classifier import QueryComplexity, classify_query
@@ -146,6 +146,5 @@ async def test_semantic_cache_operations():
         session=session,
         query_embedding=[0.1] * 768,
         workspace_id=uuid.uuid4(),
-        tenant_id=uuid.uuid4(),
     )
     assert res is None

@@ -31,6 +31,11 @@ class TenantUpdate(BaseModel):
     settings: dict | None = None
 
 
+class TenantLookupResponse(BaseModel):
+    exists: bool
+    name: str | None = None
+
+
 class TenantResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

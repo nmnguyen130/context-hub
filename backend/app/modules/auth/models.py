@@ -7,11 +7,13 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
     UniqueConstraint,
     func,
+    text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.context import UserRole
 from app.core.database import TenantBaseModel
@@ -27,11 +29,12 @@ class InvitationStatus(StrEnum):
 class User(TenantBaseModel):
     __tablename__ = "users"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "email", name="uq_users_email_tenant"),
+        UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
+        Index("ix_users_cursor", "tenant_id", "created_at", "id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(255), index=True)
+    email: Mapped[str] = mapped_column(String(255))
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, native_enum=False), default=UserRole.MEMBER
@@ -49,43 +52,40 @@ class User(TenantBaseModel):
         onupdate=func.now(),
     )
 
-    def __repr__(self) -> str:
-        return f"<User(id={self.id!s}, email={self.email!r}, role={self.role.value})>"
-
 
 class RefreshToken(TenantBaseModel):
     __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        Index(
+            "ix_refresh_tokens_active",
+            "user_id",
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index("ix_refresh_tokens_expiry", "expires_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
-        index=True,
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
 
-    @property
-    def is_revoked(self) -> bool:
-        return self.revoked_at is not None
-
-    def __repr__(self) -> str:
-        return (
-            f"<RefreshToken(id={self.id!s}, user_id={self.user_id!s}, "
-            f"revoked={self.is_revoked})>"
-        )
+    user: Mapped[User] = relationship(lazy="raise")
 
 
 class Invitation(TenantBaseModel):
     __tablename__ = "invitations"
+    __table_args__ = (
+        Index("ix_invitations_email_status", "email", "status"),
+        Index("ix_invitations_cursor", "tenant_id", "created_at", "id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(255), index=True)
+    email: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, native_enum=False),
         default=UserRole.MEMBER,
@@ -102,14 +102,5 @@ class Invitation(TenantBaseModel):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
 
-    def __repr__(self) -> str:
-        return (
-            f"<Invitation(id={self.id!s}, email={self.email!r}, "
-            f"status={self.status.value})>"
-        )
+    inviter: Mapped[User | None] = relationship(foreign_keys=[invited_by], lazy="raise")

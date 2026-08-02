@@ -1,4 +1,3 @@
-from app.modules.chat.exceptions import ChatSessionNotFoundError
 from app.modules.chat.models import ChatMessage, ChatSession
 from app.modules.chat.schemas import (
     ChatMessageResponse,
@@ -14,7 +13,6 @@ from app.modules.chat.services import ChatService
 __all__ = [
     "ChatMessage",
     "ChatSession",
-    "ChatSessionNotFoundError",
     "ChatRequest",
     "ChatSessionCreate",
     "ChatSessionUpdate",

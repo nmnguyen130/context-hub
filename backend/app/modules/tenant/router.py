@@ -8,8 +8,9 @@ from app.api.dependencies import (
     require_roles,
 )
 from app.core.context import RequestContext, UserRole
-from app.core.pagination import PaginatedResponse, PaginationParams
+from app.core.pagination import CursorPage, CursorParams
 from app.modules.tenant.schemas import (
+    TenantLookupResponse,
     TenantResponse,
     TenantStatsResponse,
     TenantUpdate,
@@ -53,35 +54,35 @@ async def get_tenant_stats(
 
 @tenants_router.get(
     "",
-    response_model=PaginatedResponse[TenantResponse],
+    response_model=CursorPage[TenantResponse],
     dependencies=[Depends(require_roles(UserRole.SUPER_ADMIN))],
 )
 async def list_tenants(
-    pagination: PaginationParams = Depends(),
+    params: CursorParams = Depends(),
     search: str | None = None,
     order_by: str = "created_at",
     tenant_service: TenantService = Depends(get_service(TenantService, public=True)),
 ):
-    """Lists all system tenants."""
-    items, total = await tenant_service.list(
-        pagination=pagination, search=search, order_by=order_by
+    """Lists all system tenants using pagination."""
+    items, next_cursor, has_more = await tenant_service.list(
+        params=params, search=search, order_by=order_by
     )
-    return PaginatedResponse[TenantResponse].create(
-        items=items, total=total, pagination=pagination
+    return CursorPage[TenantResponse](
+        items=items, next_cursor=next_cursor, has_more=has_more
     )
 
 
-@tenants_router.get("/lookup/{slug}")
+@tenants_router.get("/lookup/{slug}", response_model=TenantLookupResponse)
 async def resolve_tenant_slug(
     slug: str,
     tenant_service: TenantService = Depends(get_service(TenantService, public=True)),
 ):
     """Resolves organization existence by slug."""
     tenant = await tenant_service.get_by_slug(slug)
-    return {
-        "exists": tenant is not None,
-        "name": tenant.name if tenant else None,
-    }
+    return TenantLookupResponse(
+        exists=tenant is not None,
+        name=tenant.name if tenant else None,
+    )
 
 
 @tenants_router.delete(

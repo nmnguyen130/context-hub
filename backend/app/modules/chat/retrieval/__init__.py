@@ -25,7 +25,6 @@ class RetrievalResult:
 async def retrieve_context(
     query_plan: QueryPlan,
     workspace_ids: list[uuid.UUID],
-    tenant_id: uuid.UUID,
     session: AsyncSession,
     reranker: Reranker | None = None,
     original_query: str | None = None,
@@ -43,7 +42,6 @@ async def retrieve_context(
             session=session,
             embedding=embedding,
             workspace_ids=workspace_ids,
-            tenant_id=tenant_id,
             document_ids=document_ids,
             limit=50,
         )
@@ -54,7 +52,6 @@ async def retrieve_context(
             session=session,
             query=query,
             workspace_ids=workspace_ids,
-            tenant_id=tenant_id,
             document_ids=document_ids,
             limit=50,
         )

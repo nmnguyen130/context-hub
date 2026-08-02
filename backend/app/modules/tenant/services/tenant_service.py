@@ -1,13 +1,23 @@
 import re
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.exceptions import ServiceError
-from app.core.pagination import PaginationParams
+from app.core.pagination import CursorParams, paginate_cursor
 from app.core.uow import UnitOfWork
 from app.modules.tenant.models import Tenant
 from app.modules.tenant.schemas import TenantCreate, TenantUpdate
+
+
+def generate_slug(name: str, fallback: str = "organization") -> str:
+    """Generate a URL-safe lowercase slug from a name."""
+    slug = re.sub(
+        r"[\s_-]+",
+        "-",
+        re.sub(r"[^\w\s-]", "", name.strip().lower()),
+    ).strip("-")
+    return slug or fallback
 
 
 class TenantService:
@@ -16,34 +26,37 @@ class TenantService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def get_by_id(self, tenant_id: uuid.UUID) -> Tenant:
-        """Retrieve a tenant by ID, raising 404 if not found."""
+    async def get_by_id(
+        self, tenant_id: uuid.UUID, include_inactive: bool = False
+    ) -> Tenant:
+        """Retrieve a tenant by ID, raising 404 if not found or inactive."""
         tenant = await self.uow.session.get(Tenant, tenant_id)
-        if tenant is None:
-            raise ServiceError("Tenant not found.", status_code=404)
+        if tenant is None or (not include_inactive and not tenant.is_active):
+            raise ServiceError.not_found("Tenant")
         return tenant
 
     async def get_by_slug(self, slug: str) -> Tenant | None:
-        """Retrieve a tenant by slug, returning None if not found."""
+        """Retrieve an active tenant by slug, returning None if not found or inactive."""
         return await self.uow.session.scalar(
-            select(Tenant).where(Tenant.slug == slug.strip().lower())
+            select(Tenant).where(
+                Tenant.slug == slug.strip().lower(),
+                Tenant.is_active.is_(True),
+            )
         )
 
     async def list(
         self,
-        pagination: PaginationParams | None = None,
+        params: CursorParams | None = None,
         search: str | None = None,
         order_by: str = "created_at",
-    ) -> tuple[list[Tenant], int]:
-        """List tenants with pagination, search, and ordering constraints."""
-        pagination = pagination or PaginationParams()
-        stmt = select(Tenant)
+    ) -> tuple[list[Tenant], str | None, bool]:
+        """List active tenants with pagination and optional search filter."""
+        params = params or CursorParams()
+        stmt = select(Tenant).where(Tenant.is_active.is_(True))
 
         if search:
-            search_query = f"%{search.strip().lower()}%"
-            stmt = stmt.where(
-                Tenant.name.ilike(search_query) | Tenant.slug.ilike(search_query)
-            )
+            term = f"%{search.strip().lower()}%"
+            stmt = stmt.where(Tenant.name.ilike(term) | Tenant.slug.ilike(term))
 
         order_columns = {
             "name": Tenant.name,
@@ -52,33 +65,27 @@ class TenantService:
             "plan_tier": Tenant.plan_tier,
         }
 
-        normalized_order = order_by.lower().strip()
-        if normalized_order not in order_columns:
-            raise ServiceError(f"Invalid sort column: {order_by}", status_code=422)
+        sort_col = order_columns.get(order_by.lower().strip())
+        if sort_col is None:
+            raise ServiceError.unprocessable(f"Invalid sort column: {order_by}")
 
-        sort_col = order_columns[normalized_order]
-        stmt = stmt.order_by(sort_col)
-
-        # Count total matching records before applying pagination
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total = await self.uow.session.scalar(count_stmt) or 0
-
-        # Retrieve the paginated items
-        paginated_stmt = stmt.offset(pagination.offset).limit(pagination.limit)
-        items = (await self.uow.session.scalars(paginated_stmt)).all()
-
-        return list(items), total
+        return await paginate_cursor(
+            self.uow.session,
+            stmt,
+            params,
+            sort_column=sort_col,
+            id_column=Tenant.id,
+        )
 
     async def create(self, data: TenantCreate) -> Tenant:
         """Prepare and persist a new Tenant."""
-        slug = (
-            self.generate_slug(data.slug)
-            if data.slug
-            else self.generate_slug(data.name)
-        )
+        slug = generate_slug(data.slug if data.slug else data.name)
 
-        if await self.get_by_slug(slug):
-            raise ServiceError("Tenant slug already exists.", status_code=409)
+        existing = await self.uow.session.scalar(
+            select(Tenant).where(Tenant.slug == slug)
+        )
+        if existing:
+            raise ServiceError.conflict("Tenant slug already exists.")
 
         tenant = Tenant(name=data.name.strip(), slug=slug)
         self.uow.session.add(tenant)
@@ -103,13 +110,3 @@ class TenantService:
         tenant = await self.get_by_id(tenant_id)
         tenant.is_active = False
         await self.uow.flush()
-
-    @staticmethod
-    def generate_slug(name: str) -> str:
-        """Generate a URL-safe lowercase slug from a name."""
-        slug = re.sub(
-            r"[\s_-]+",
-            "-",
-            re.sub(r"[^\w\s-]", "", name.strip().lower()),
-        ).strip("-")
-        return slug or "organization"
