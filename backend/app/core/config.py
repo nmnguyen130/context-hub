@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str | None = None
     S3_BUCKET_NAME: str = "contexthub"
     S3_REGION_NAME: str = "us-east-1"
-    S3_SECURE: bool = True
+    S3_SECURE: bool = False
     MAX_FILE_SIZE_MB: int = 20
 
     # AI Providers

@@ -6,11 +6,11 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 
 ## Phase 1: Foundation & Core Ingestion Pipeline
 
-### [/] Task 1.1: Project Initialization & Dev Environment
+### [x] Task 1.1: Project Initialization & Dev Environment
 - [x] Initialize Python backend environment with uv (FastAPI, SQLAlchemy, Alembic).
-- [ ] Initialize frontend project with Next.js (App Router, TypeScript, Tailwind CSS v4).
-- [x] Create `docker-compose.yml` for local services: PostgreSQL with `pgvector` and Redis.
-- [/] Set up basic CI linting (Ruff for backend configured, ESLint for frontend pending).
+- [x] Initialize frontend project with Next.js 16.3.0 (App Router, TypeScript, Tailwind CSS v4).
+- [x] Create `docker-compose.yml` for local services: PostgreSQL with `pgvector`, Redis, MinIO, Backend, Celery, and Frontend.
+- [x] Set up basic CI linting and TypeScript verification.
 
 ### [x] Task 1.2: Multi-Tenant Relational Database Setup
 - [x] Create PostgreSQL schema migrations for Core Models:
@@ -21,9 +21,9 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 - [x] Configure Async SQLAlchemy engine with thread-safe `tenant_id` context propagation.
 - [x] Write integration test ensuring two users from different tenants cannot read/write each other's data.
 
-### [/] Task 1.3: Authentication & Logical Scope Middleware
+### [x] Task 1.3: Authentication & Logical Scope Middleware
 - [x] Implement JWT-based registration and login flows inside FastAPI (with `tenant_id` claims).
-- [ ] Write Next.js middleware checking tokens, handling redirect loops, and saving session state in client-side secure HTTPOnly cookies.
+- [x] Write Next.js Edge proxy checking session cookies, handling route protection (`/app/*`), and managing session state.
 - [x] Implement FastAPI dependency injection helpers: `get_current_user`, `get_current_tenant`.
 
 ### [x] Task 1.4: Base Ingestion & Object Storage
@@ -56,18 +56,20 @@ This document maps out the engineering steps to build **ContextHub** from the gr
 - [x] Build a Python module implementing Reciprocal Rank Fusion (RRF) combining dense search rank and sparse search rank.
 - [x] Set up Cohere Rerank API integration (and zero-cost ContextBoostReranker) to refine candidate chunks.
 
-### [x] Task 2.3: Grounded Conversational AI Stream (Backend Complete)
+### [x] Task 2.3: Grounded Conversational AI Stream (Complete)
 - [x] Implement streaming API router `/api/v1/chat/stream` in FastAPI.
 - [x] Draft system prompt instructing Gemini to rely exclusively on context and output citations.
 - [x] Write Python parser extracting chunk citations from LLM responses, retrieving referenced chunk metadata, and building a structured JSON response payload alongside the text stream.
-- [ ] Build a streaming chat UI in Next.js displaying citations with hoverable tooltip metadata (Document Name, Excerpt).
+- [x] Build a streaming chat UI in Next.js displaying citations with hoverable tooltip metadata (Document Name, Excerpt).
 
 ---
 
 ## Phase 3: Knowledge Organization & Row-Level Authorization
 
-### [ ] Task 3.1: Spaces & Collections Dashboard
-- [ ] Design the workspaces dashboard UI using Tailwind CSS v4 and Radix UI elements.
+### [/] Task 3.1: Spaces & Collections Dashboard
+- [x] Design the workspaces dashboard UI using Tailwind CSS v4 and Radix UI elements.
+- [x] Implement API endpoints to Create, Update, and Delete Workspaces.
+
 - [ ] Implement API endpoints to Create, Update, and Delete Workspaces.
 - [ ] Implement Workspace Collections (logical folders inside Workspaces).
 - [ ] Add document transfer logic (moving documents between Workspaces).

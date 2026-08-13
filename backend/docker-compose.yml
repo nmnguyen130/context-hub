@@ -1,60 +1,83 @@
 x-python-service: &python-service
   build: .
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment:
+    POSTGRES_HOST: postgres
+    REDIS_URL: redis://redis:6379/0
+    S3_ENDPOINT_URL: http://minio:9000
+    PYTHONPATH: /app
+  volumes:
+    - ./app:/app/app
+    - ./alembic:/app/alembic
   depends_on:
-    db:
+    postgres:
       condition: service_healthy
     redis:
       condition: service_healthy
-  env_file: .env
-  environment:
-    POSTGRES_HOST: db
-    REDIS_URL: redis://redis:6379/0
-    PYTHONPATH: /app
-  restart: unless-stopped
+    minio:
+      condition: service_started
 
 services:
-  db:
+  postgres:
     image: pgvector/pgvector:pg18
-    env_file: .env
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_OWNER_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
-    environment:
-      POSTGRES_USER: ${POSTGRES_OWNER_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-contexthub}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_OWNER_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
   redis:
     image: redis:8-alpine
+    restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  api:
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+
+  backend:
     <<: *python-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
 
-  worker:
+  celery_worker:
     <<: *python-service
-    command: celery -A app.worker.tasks.celery_app worker --loglevel=info
+    command: celery -A app.worker.tasks.celery_app worker --loglevel=info -c 2
 
   relay:
     <<: *python-service
@@ -63,3 +86,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:

@@ -1,0 +1,21 @@
+# Dependencies & Build Output
+node_modules/
+.next/
+out/
+build/
+
+# Logs & Cache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Git & Documentation
+.git/
+.gitignore
+README.md
+
+# Local Environment
+.env
+.env*.local
+!.env.example

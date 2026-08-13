@@ -44,6 +44,7 @@ class RegistrationService:
             hashed_password=hash_password(data.password),
             role=UserRole.ADMIN,
             is_active=True,
+            display_name=data.display_name.strip() if data.display_name else None,
         )
         self.uow.session.add(user)
         await self.uow.flush()

@@ -74,27 +74,34 @@ class UserService:
         acting_user_role: UserRole,
     ) -> User:
         """Modify a user's role, enforcing role hierarchy and self-modification blocks."""
-        if target_user_id == acting_user_id:
-            raise ServiceError.bad_request("Admins cannot modify their own roles")
-
         user = await self.get_user(target_user_id)
 
-        if not acting_user_role.has_higher_privilege_than(user.role):
-            raise ServiceError.forbidden(
-                "Cannot modify a user with equal or higher authority"
-            )
+        if data.display_name is not None:
+            user.display_name = data.display_name.strip() or None
+        if data.avatar_url is not None:
+            user.avatar_url = data.avatar_url.strip() or None
 
-        if data.role.priority > acting_user_role.priority:
-            raise ServiceError.forbidden("Cannot assign a role higher than your own")
+        if data.role is not None:
+            if target_user_id == acting_user_id:
+                raise ServiceError.bad_request("Admins cannot modify their own roles")
 
-        if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
-            admin_count = await self._count_active_admins(user.tenant_id)
-            if admin_count <= 1:
-                raise ServiceError.bad_request(
-                    "Cannot demote the only remaining active Administrator"
+            if not acting_user_role.has_higher_privilege_than(user.role):
+                raise ServiceError.forbidden(
+                    "Cannot modify a user with equal or higher authority"
                 )
 
-        user.role = data.role
+            if data.role.priority > acting_user_role.priority:
+                raise ServiceError.forbidden("Cannot assign a role higher than your own")
+
+            if user.role == UserRole.ADMIN and data.role != UserRole.ADMIN:
+                admin_count = await self._count_active_admins(user.tenant_id)
+                if admin_count <= 1:
+                    raise ServiceError.bad_request(
+                        "Cannot demote the only remaining active Administrator"
+                    )
+
+            user.role = data.role
+
         await self.uow.flush()
         return user
 

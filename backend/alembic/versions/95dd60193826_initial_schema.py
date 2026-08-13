@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 191e166a044d
+Revision ID: 95dd60193826
 Revises: None
-Create Date: 2026-08-02 14:02:52.737467
+Create Date: 2026-08-13 05:47:37.045253
 
 """
 # ruff: noqa: F401
@@ -16,7 +16,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '191e166a044d'
+revision: str = '95dd60193826'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -64,6 +64,8 @@ def upgrade() -> None:
     sa.Column('hashed_password', sa.String(length=255), nullable=True),
     sa.Column('role', sa.Enum('SUPER_ADMIN', 'OWNER', 'ADMIN', 'MEMBER', 'VIEWER', name='userrole', native_enum=False), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.Column('display_name', sa.String(length=255), nullable=True),
+    sa.Column('avatar_url', sa.String(length=1000), nullable=True),
     sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),

@@ -16,6 +16,7 @@ class RegisterRequest(BaseModel):
     tenant_name: str = Field(min_length=3, max_length=100)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
+    display_name: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -39,7 +40,9 @@ class InvitationAccept(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    role: UserRole
+    role: UserRole | None = None
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -49,6 +52,8 @@ class UserResponse(BaseModel):
     email: EmailStr
     role: UserRole
     is_active: bool
+    display_name: str | None = None
+    avatar_url: str | None = None
     created_at: datetime
     updated_at: datetime
 

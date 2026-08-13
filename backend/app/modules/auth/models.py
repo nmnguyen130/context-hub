@@ -40,6 +40,8 @@ class User(TenantBaseModel):
         Enum(UserRole, native_enum=False), default=UserRole.MEMBER
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
