@@ -9,7 +9,7 @@ export function Card({
   return (
     <div
       className={clsx(
-        "glass-panel rounded-xl p-5 border border-slate-800/80 bg-slate-900/60 shadow-xl",
+        "rounded-xl p-5 border border-stroke bg-surface shadow-xl",
         className
       )}
       {...props}
@@ -37,7 +37,7 @@ export function CardTitle({
   return (
     <h3
       className={clsx(
-        "text-lg font-semibold text-slate-100 tracking-tight",
+        "text-base sm:text-lg font-bold text-primary tracking-tight font-heading",
         className
       )}
     >
@@ -51,7 +51,7 @@ export function CardDescription({
   className,
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
-    <p className={clsx("text-xs text-slate-400 leading-relaxed", className)}>
+    <p className={clsx("text-xs text-muted leading-relaxed", className)}>
       {children}
     </p>
   );

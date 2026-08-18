@@ -2,143 +2,137 @@
 
 import Link from "next/link";
 import { Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
 export function LandingPricing() {
   const tiers = [
     {
-      name: "Starter",
-      badge: "Free Developer Tier",
+      name: "Developer",
+      tag: "Free Tier",
       price: "$0",
-      period: "forever",
-      description: "For individual teams testing internal document retrieval.",
+      description: "For individual teams testing internal document retrieval and RAG search.",
       features: [
-        "Up to 20 Users",
-        "10 GB Ingestion Storage",
-        "Logical Multi-Tenant Isolation",
-        "Hybrid RAG + Citations",
-        "Standard PDF/Markdown Parsers",
+        "Up to 5 Workspaces",
+        "Standard PDF, DOCX & Markdown parsing",
+        "pgvector HNSW cosine similarity",
+        "Deterministic inline citations",
+        "Logical multi-tenant isolation",
       ],
-      buttonText: "Start Free",
-      buttonVariant: "outline" as const,
-      popular: false,
+      ctaText: "Deploy Free Workspace",
+      ctaHref: "/register",
+      featured: false,
     },
     {
-      name: "Professional",
-      badge: "Most Popular",
+      name: "Team",
+      tag: "Most Popular",
       price: "$49",
-      period: "per month",
-      description: "For growing organizations requiring scaling RAG search & custom connectors.",
+      period: "/ month",
+      description: "For engineering & ops teams scaling knowledge search and ingestion.",
       features: [
-        "Unlimited Users",
-        "500 GB Ingestion Storage",
-        "Cohere Rerank API Integration",
-        "Redis Sliding-Window Rate Limiting",
-        "Workspace RBAC Permissions",
-        "Priority Support",
+        "Unlimited Workspaces & Collections",
+        "Multi-User Directory & RBAC Roles",
+        "Hybrid Search (Dense pgvector + Sparse tsvector)",
+        "Reciprocal Rank Fusion (RRF) reranking",
+        "Asynchronous Celery ingestion pipeline",
+        "Activity & audit logging",
       ],
-      buttonText: "Get Pro Plan",
-      buttonVariant: "primary" as const,
-      popular: true,
+      ctaText: "Start Team Workspace",
+      ctaHref: "/register",
+      featured: true,
     },
     {
       name: "Enterprise",
-      badge: "VPC & Hybrid",
+      tag: "Dedicated / VPC",
       price: "Custom",
-      period: "annual billing",
-      description: "Dedicated single-tenant DB, custom SAML/SSO federation, and DLP scanner.",
+      description: "For enterprises requiring dedicated isolation, SSO federation, and custom SLAs.",
       features: [
-        "Dedicated VPC / On-Prem Deployment",
-        "Unlimited Ingest Storage",
-        "SAML 2.0 / Okta SSO Integration",
-        "Pre-ingest DLP (PII Redaction)",
-        "Immutable Audit Logs CSV Export",
-        "Dedicated Solutions Architect",
+        "Dedicated Single-Tenant Database or VPC",
+        "SAML 2.0 / OIDC SSO Integration",
+        "Configurable DLP & PII regex sanitization",
+        "Immutable audit log export (CSV / SIEM)",
+        "Custom LLM API key & model routing policies",
+        "Dedicated SLA & technical support",
       ],
-      buttonText: "Contact Sales",
-      buttonVariant: "secondary" as const,
-      popular: false,
+      ctaText: "Contact Sales",
+      ctaHref: "mailto:sales@contexthub.internal",
+      featured: false,
     },
   ];
 
   return (
-    <section id="pricing" className="py-20 relative">
+    <section id="pricing" className="py-20 border-b border-stroke bg-canvas">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <Badge variant="purple" size="md">
-            Flexible Scaling
-          </Badge>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white font-outfit tracking-tight mt-3">
-            Transparent Packaging for <span className="text-gradient">Every Team Size</span>
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <div className="text-[11px] font-mono text-accent uppercase tracking-wider mb-1">
+            Packaging & Deployment
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-primary tracking-tight font-heading">
+            Predictable Plans for Every Stage
           </h2>
-          <p className="text-slate-400 text-sm mt-2 max-w-xl mx-auto">
-            Choose the plan that fits your institutional data ingestion needs.
+          <p className="text-xs text-muted mt-2">
+            Start free on logical multi-tenancy, or deploy dedicated VPC infrastructure as your organization grows.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
+        {/* 3 Pricing Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto items-stretch">
           {tiers.map((tier, idx) => (
-            <Card
+            <div
               key={idx}
-              className={`glass-card flex flex-col justify-between relative ${
-                tier.popular
-                  ? "border-indigo-500/60 shadow-2xl shadow-indigo-500/10 ring-1 ring-indigo-500/50"
-                  : ""
+              className={`p-6 rounded-xl flex flex-col justify-between transition-all ${
+                tier.featured
+                  ? "bg-surface border-2 border-accent shadow-lg relative"
+                  : "bg-surface border border-stroke hover:border-stroke-strong"
               }`}
             >
-              {tier.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-0.5 rounded-full shadow-md">
-                  Most Popular
-                </div>
-              )}
-
               <div>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl font-bold">{tier.name}</CardTitle>
-                    <Badge variant={tier.popular ? "info" : "neutral"}>
-                      {tier.badge}
-                    </Badge>
-                  </div>
-                  <CardDescription className="mt-2 text-xs">
-                    {tier.description}
-                  </CardDescription>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-base font-bold text-primary font-heading">{tier.name}</h3>
+                  <span
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                      tier.featured
+                        ? "bg-accent/10 text-accent border-accent/30 font-semibold"
+                        : "bg-surface-elevated text-muted border-stroke"
+                    }`}
+                  >
+                    {tier.tag}
+                  </span>
+                </div>
 
-                  <div className="mt-6 flex items-baseline gap-1">
-                    <span className="text-4xl font-extrabold text-white font-outfit">
-                      {tier.price}
-                    </span>
-                    <span className="text-slate-400 text-xs font-normal">
-                      /{tier.period}
-                    </span>
-                  </div>
-                </CardHeader>
+                <p className="text-xs text-muted min-h-[32px]">{tier.description}</p>
 
-                <div className="px-5 py-4 space-y-3">
-                  <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Included Features:
-                  </p>
-                  {tier.features.map((feature, fIdx) => (
-                    <div key={fIdx} className="flex items-center gap-2.5 text-xs text-slate-300">
-                      <div className="w-4 h-4 rounded-full bg-emerald-950 border border-emerald-500/40 flex items-center justify-center shrink-0">
-                        <Check className="w-2.5 h-2.5 text-emerald-400" />
-                      </div>
-                      <span>{feature}</span>
+                <div className="mt-5 mb-6 flex items-baseline gap-1">
+                  <span className="text-3xl font-extrabold text-primary font-heading">
+                    {tier.price}
+                  </span>
+                  {tier.period && (
+                    <span className="text-xs text-muted">{tier.period}</span>
+                  )}
+                </div>
+
+                <div className="space-y-2.5 border-t border-stroke pt-4 text-xs">
+                  <div className="text-[10px] font-mono text-muted uppercase mb-2">Features Included:</div>
+                  {tier.features.map((f, fIdx) => (
+                    <div key={fIdx} className="flex items-start gap-2 text-secondary">
+                      <Check className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
+                      <span className="leading-tight">{f}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="p-5 pt-0 mt-6">
-                <Link href="/register">
-                  <Button variant={tier.buttonVariant} className="w-full">
-                    {tier.buttonText}
-                  </Button>
+              <div className="mt-8 pt-4 border-t border-stroke">
+                <Link
+                  href={tier.ctaHref}
+                  className={`w-full block text-center text-xs font-semibold py-2.5 rounded-md transition-colors cursor-pointer ${
+                    tier.featured
+                      ? "bg-accent hover:bg-accent-hover text-white shadow-sm"
+                      : "bg-surface-elevated hover:bg-surface-hover text-primary border border-stroke"
+                  }`}
+                >
+                  {tier.ctaText}
                 </Link>
               </div>
-            </Card>
+            </div>
           ))}
         </div>
       </div>

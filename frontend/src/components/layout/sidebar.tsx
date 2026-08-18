@@ -7,26 +7,32 @@ import {
   FolderKanban,
   MessageSquareText,
   Settings,
-  Sparkles,
+  Terminal,
   ChevronLeft,
   ChevronRight,
-  ShieldAlert,
+  Shield,
+  KeyRound,
+  FileText,
 } from "lucide-react";
 import { useUIStore } from "@/store/ui-store";
+import { useCurrentUser } from "@/features/auth/hooks/use-current-user";
 import { clsx } from "clsx";
 
 export function AppSidebar() {
   const pathname = usePathname();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
+  const { data: user } = useCurrentUser();
 
-  const navItems = [
+  const isAdmin = user?.role === "ADMIN" || user?.role === "OWNER";
+
+  const userNavItems = [
     {
       name: "Dashboard",
       href: "/dashboard",
       icon: LayoutDashboard,
     },
     {
-      name: "Workspaces & Documents",
+      name: "Workspaces & Ingest",
       href: "/workspaces",
       icon: FolderKanban,
     },
@@ -35,51 +41,68 @@ export function AppSidebar() {
       href: "/chat",
       icon: MessageSquareText,
     },
+  ];
+
+  const adminNavItems = [
     {
-      name: "Settings & Tenant Admin",
-      href: "/settings",
+      name: "Tenant Governance",
+      href: "/settings/general",
       icon: Settings,
+    },
+    {
+      name: "Connectors & Sync",
+      href: "/settings/connectors",
+      icon: KeyRound,
+    },
+    {
+      name: "Audit Explorer",
+      href: "/settings/audit",
+      icon: FileText,
     },
   ];
 
   return (
     <aside
       className={clsx(
-        "glass-panel border-r border-slate-800 bg-slate-950/80 transition-all duration-300 flex flex-col justify-between z-30 relative",
-        sidebarCollapsed ? "w-16" : "w-64"
+        "bg-surface border-r border-stroke transition-all duration-200 flex flex-col justify-between z-30 relative shrink-0",
+        sidebarCollapsed ? "w-16" : "w-60"
       )}
     >
       <div>
         {/* Logo Header */}
-        <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800/80">
+        <div className="h-14 px-3.5 flex items-center justify-between border-b border-stroke">
           <Link href="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-400 p-0.5 shrink-0">
-              <div className="w-full h-full bg-slate-950 rounded-[6px] flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-              </div>
+            <div className="w-7 h-7 rounded-md bg-surface-dark border border-stroke flex items-center justify-center text-accent shrink-0">
+              <Terminal className="w-3.5 h-3.5" />
             </div>
             {!sidebarCollapsed && (
-              <span className="font-bold text-lg text-white font-outfit truncate">
-                Context<span className="text-gradient">Hub</span>
+              <span className="font-bold text-sm text-primary tracking-tight truncate font-heading">
+                Context<span className="text-accent">Hub</span>
               </span>
             )}
           </Link>
 
           <button
             onClick={toggleSidebar}
-            className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white shrink-0"
+            className="w-6 h-6 rounded bg-surface-elevated border border-stroke hover:bg-surface-hover flex items-center justify-center text-muted hover:text-primary shrink-0 transition-colors cursor-pointer"
+            aria-label="Toggle Sidebar"
           >
             {sidebarCollapsed ? (
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             ) : (
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             )}
           </button>
         </div>
 
-        {/* Navigation list */}
-        <nav className="p-2 space-y-1 mt-2">
-          {navItems.map((item) => {
+        {/* User Workspace Section */}
+        <nav className="p-2 space-y-1">
+          {!sidebarCollapsed && (
+            <div className="px-2.5 pt-2 pb-1 text-[10px] font-mono text-muted uppercase tracking-wider">
+              Workspace
+            </div>
+          )}
+          {userNavItems.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -89,32 +112,68 @@ export function AppSidebar() {
                 key={item.href}
                 href={item.href}
                 className={clsx(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all group relative",
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium transition-all group relative",
                   isActive
-                    ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold"
-                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                    ? "bg-surface-elevated text-accent border border-stroke font-semibold"
+                    : "text-muted hover:bg-surface-elevated/60 hover:text-primary"
                 )}
                 title={sidebarCollapsed ? item.name : undefined}
               >
                 <item.icon
                   className={clsx(
                     "w-4 h-4 shrink-0 transition-colors",
-                    isActive ? "text-indigo-400" : "group-hover:text-slate-200"
+                    isActive ? "text-accent" : "group-hover:text-primary"
                   )}
                 />
-                {!sidebarCollapsed && <span>{item.name}</span>}
+                {!sidebarCollapsed && <span className="truncate">{item.name}</span>}
               </Link>
             );
           })}
+
+          {/* Admin Governance Section */}
+          {isAdmin && (
+            <>
+              {!sidebarCollapsed && (
+                <div className="px-2.5 pt-4 pb-1 text-[10px] font-mono text-muted uppercase tracking-wider">
+                  Admin & Security
+                </div>
+              )}
+              {adminNavItems.map((item) => {
+                const isActive = pathname.startsWith(item.href.split("/")[1] + "/" + item.href.split("/")[2]);
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={clsx(
+                      "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium transition-all group relative",
+                      isActive
+                        ? "bg-surface-elevated text-accent border border-stroke font-semibold"
+                        : "text-muted hover:bg-surface-elevated/60 hover:text-primary"
+                    )}
+                    title={sidebarCollapsed ? item.name : undefined}
+                  >
+                    <item.icon
+                      className={clsx(
+                        "w-4 h-4 shrink-0 transition-colors",
+                        isActive ? "text-accent" : "group-hover:text-primary"
+                      )}
+                    />
+                    {!sidebarCollapsed && <span className="truncate">{item.name}</span>}
+                  </Link>
+                );
+              })}
+            </>
+          )}
         </nav>
       </div>
 
       {/* Footer Info */}
       {!sidebarCollapsed && (
-        <div className="p-4 border-t border-slate-800/80 bg-slate-900/40">
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <ShieldAlert className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate">Multi-Tenant Protected</span>
+        <div className="p-3 border-t border-stroke bg-surface-dark">
+          <div className="flex items-center gap-2 text-[10px] font-mono text-muted">
+            <Shield className="w-3.5 h-3.5 text-success shrink-0" />
+            <span className="truncate">TENANT ISOLATED</span>
           </div>
         </div>
       )}

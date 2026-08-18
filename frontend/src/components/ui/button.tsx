@@ -26,25 +26,25 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const baseStyles =
-      "inline-flex items-center justify-center font-medium rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#090d16] disabled:opacity-50 disabled:cursor-not-allowed";
+      "inline-flex items-center justify-center font-medium rounded-lg transition-all focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-offset-canvas disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
 
     const variants = {
       primary:
-        "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-600/25 focus:ring-indigo-500 border border-indigo-500/30",
+        "bg-accent hover:bg-accent-hover text-white shadow-sm border border-accent/40 focus:ring-accent",
       secondary:
-        "bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700/60 focus:ring-slate-500",
+        "bg-surface-elevated hover:bg-surface-hover text-primary border border-stroke hover:border-stroke-strong focus:ring-stroke",
       outline:
-        "bg-transparent hover:bg-slate-800/60 text-slate-200 border border-slate-700 hover:border-slate-500 focus:ring-slate-500",
+        "bg-transparent hover:bg-surface-elevated text-primary border border-stroke hover:border-stroke-strong focus:ring-stroke",
       danger:
-        "bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 focus:ring-rose-500",
+        "bg-danger hover:bg-danger/90 text-white shadow-sm focus:ring-danger",
       ghost:
-        "bg-transparent hover:bg-slate-800/50 text-slate-300 hover:text-white focus:ring-slate-500",
+        "bg-transparent hover:bg-surface-elevated text-muted hover:text-primary focus:ring-stroke",
     };
 
     const sizes = {
       sm: "text-xs px-3 py-1.5 gap-1.5",
-      md: "text-sm px-4 py-2 gap-2",
-      lg: "text-base px-6 py-2.5 gap-2.5",
+      md: "text-xs sm:text-sm px-4 py-2 gap-2",
+      lg: "text-sm sm:text-base px-5 py-2.5 gap-2.5",
     };
 
     return (
@@ -55,7 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {isLoading ? (
-          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
         ) : (
           leftIcon
         )}

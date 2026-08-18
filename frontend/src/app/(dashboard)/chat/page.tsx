@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Sparkles,
   Send,
   Plus,
   FileText,
   Square,
-  Clock,
   X,
   MessageSquareText,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import { useChatStore } from "@/store/chat-store";
@@ -19,14 +22,20 @@ import {
   useCreateChatSession,
   useSendChatMessage,
 } from "@/features/chat/hooks/use-chat";
+import { useWorkspaces } from "@/features/workspace/hooks/use-workspaces";
 import { Citation } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ChatPage() {
   const [inputQuery, setInputQuery] = useState("");
+  const [showControls, setShowControls] = useState(false);
+  const [retrievalPolicy, setRetrievalPolicy] = useState("balanced");
+  const [scopeAll, setScopeAll] = useState(false);
+
   const { activeWorkspaceId } = useWorkspaceStore();
+  const { data: workspacesData } = useWorkspaces();
+  const activeWorkspace = workspacesData?.items.find((w) => w.id === activeWorkspaceId);
+
   const {
     activeSessionId,
     setActiveSessionId,
@@ -71,125 +80,168 @@ export default function ChatPage() {
 
     const query = inputQuery;
     setInputQuery("");
-    await sendMessage(targetSessionId, activeWorkspaceId, query);
+    await sendMessage(targetSessionId, activeWorkspaceId, query, {
+      retrieval_policy: retrievalPolicy,
+      scope: scopeAll ? "all" : "workspace",
+    });
   };
 
   return (
-    <div className="h-[calc(100vh-7rem)] flex gap-4 max-w-7xl mx-auto">
-      {/* Session History Sidebar */}
-      <div className="w-64 glass-panel rounded-2xl p-4 border border-slate-800 flex flex-col justify-between hidden md:flex">
+    <div className="h-[calc(100vh-6.5rem)] flex gap-4 max-w-7xl mx-auto">
+      {/* Session History Sidebar (Desktop) */}
+      <div className="w-60 bg-surface rounded-lg p-3 border border-stroke flex flex-col justify-between hidden md:flex shrink-0">
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-[11px] font-mono text-muted uppercase">
               Chat History
             </span>
             <button
               onClick={handleStartNewSession}
               disabled={!activeWorkspaceId}
-              className="p-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 transition-colors"
+              className="p-1 rounded bg-surface-elevated hover:bg-surface-hover text-muted hover:text-accent border border-stroke transition-colors cursor-pointer"
               title="New Session"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="space-y-1.5 overflow-y-auto max-h-[calc(100vh-14rem)] pr-1">
+          <div className="space-y-1 overflow-y-auto max-h-[calc(100vh-14rem)] pr-1">
             {loadingSessions ? (
               <div className="space-y-2">
-                <Skeleton className="h-10" />
-                <Skeleton className="h-10" />
+                <div className="h-8 rounded bg-surface-elevated animate-pulse"></div>
+                <div className="h-8 rounded bg-surface-elevated animate-pulse"></div>
               </div>
             ) : sessions.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-4">No chat sessions yet.</p>
+              <p className="text-xs text-muted text-center py-6">No previous chat sessions.</p>
             ) : (
               sessions.map((s) => {
                 const isSelected = activeSessionId === s.id;
                 return (
-                  <div
+                  <button
                     key={s.id}
                     onClick={() => setActiveSessionId(s.id)}
-                    className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer text-xs transition-all ${
+                    className={`w-full flex items-center gap-2 p-2 rounded-md text-xs transition-colors text-left truncate cursor-pointer ${
                       isSelected
-                        ? "bg-indigo-950/60 text-indigo-200 border border-indigo-500/40 font-medium"
-                        : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                        ? "bg-surface-elevated text-accent border border-stroke font-semibold"
+                        : "text-muted hover:bg-surface-elevated/60 hover:text-primary"
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate">
-                      <MessageSquareText className="w-3.5 h-3.5 shrink-0 text-indigo-400" />
-                      <span className="truncate">{s.title || "Untitled Chat"}</span>
-                    </div>
-                  </div>
+                    <MessageSquareText className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{s.title || "Untitled Conversation"}</span>
+                  </button>
                 );
               })
             )}
           </div>
         </div>
 
-        <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex items-center gap-1.5">
-          <Clock className="w-3.5 h-3.5 text-slate-400" />
-          <span>Grounded in Active Workspace</span>
+        <div className="pt-2 border-t border-stroke text-[10px] font-mono text-muted flex items-center gap-1">
+          <ShieldCheck className="w-3 h-3 text-success" />
+          <span className="truncate">ACL Verified Grounding</span>
         </div>
       </div>
 
-      {/* Main Chat Conversation Window */}
-      <div className="flex-1 glass-panel rounded-2xl border border-slate-800 flex flex-col justify-between overflow-hidden bg-slate-950/70">
+      {/* Main Conversational Window */}
+      <div className="flex-1 bg-surface rounded-lg border border-stroke flex flex-col justify-between overflow-hidden">
+        {/* Top Scope & Collapsible Retrieval Controls Header */}
+        <div className="border-b border-stroke bg-surface-dark p-3 text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-primary">
+                {activeWorkspace ? `Grounded in ${activeWorkspace.name}` : "Select a Workspace above"}
+              </span>
+              <span className="text-[10px] font-mono text-muted">
+                · Policy: {retrievalPolicy.toUpperCase()}
+              </span>
+            </div>
+
+            <button
+              onClick={() => setShowControls(!showControls)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-primary cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>{showControls ? "Hide Controls" : "Retrieval Policy"}</span>
+              {showControls ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          </div>
+
+          {/* Collapsible Retrieval Policy Bar */}
+          {showControls && (
+            <div className="pt-2 border-t border-stroke grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+              <div>
+                <label className="text-muted block mb-1">Retrieval Policy</label>
+                <select
+                  value={retrievalPolicy}
+                  onChange={(e) => setRetrievalPolicy(e.target.value)}
+                  className="w-full p-1.5 rounded bg-surface-elevated border border-stroke text-primary text-xs"
+                >
+                  <option value="balanced">Balanced (Hybrid Search + RRF)</option>
+                  <option value="fast">Fast (Low latency dense search)</option>
+                  <option value="quality">Exhaustive (Deep cross-document context)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-muted block mb-1">Knowledge Scope</label>
+                <select
+                  value={scopeAll ? "all" : "workspace"}
+                  onChange={(e) => setScopeAll(e.target.value === "all")}
+                  className="w-full p-1.5 rounded bg-surface-elevated border border-stroke text-primary text-xs"
+                >
+                  <option value="workspace">Active Workspace Only (Strict Boundary)</option>
+                  <option value="all">All Accessible Workspaces</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Messages Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
           {loadingMessages ? (
-            <div className="space-y-4">
-              <Skeleton className="h-16 w-3/4 ml-auto" />
-              <Skeleton className="h-24 w-3/4" />
+            <div className="space-y-3">
+              <div className="h-14 w-2/3 ml-auto rounded-lg bg-surface-elevated animate-pulse"></div>
+              <div className="h-20 w-3/4 rounded-lg bg-surface-elevated animate-pulse"></div>
             </div>
           ) : messages.length === 0 && !isStreaming ? (
-            <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 my-auto">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-950/80 text-indigo-400 border border-indigo-500/30 flex items-center justify-center mb-3">
-                <Sparkles className="w-6 h-6" />
+            <div className="h-full flex flex-col items-center justify-center text-center text-muted my-auto space-y-2 py-12">
+              <div className="w-10 h-10 rounded-md bg-surface-elevated border border-stroke flex items-center justify-center text-accent mx-auto">
+                <Sparkles className="w-5 h-5" />
               </div>
-              <h3 className="text-base font-bold text-white font-outfit">
-                Grounded Hybrid RAG Assistant
-              </h3>
-              <p className="text-xs text-slate-400 max-w-md mt-1">
-                Ask questions about documents in your active workspace. Answers will be synthesized strictly with inline citations.
+              <h3 className="text-sm font-bold text-primary font-heading">Grounded Knowledge Assistant</h3>
+              <p className="text-xs max-w-sm">
+                Ask questions about documents in this workspace. Answers are strictly synthesized with verified inline citations.
               </p>
             </div>
           ) : (
             <>
-              {/* Existing Message History */}
               {messages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  {msg.role === "assistant" && (
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shrink-0 shadow-md">
-                      <Sparkles className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-
                   <div
-                    className={`p-4 rounded-2xl max-w-2xl text-sm leading-relaxed ${
+                    className={`p-3.5 rounded-lg max-w-2xl text-xs leading-relaxed ${
                       msg.role === "user"
-                        ? "bg-indigo-600/90 text-white rounded-tr-none shadow-md"
-                        : "bg-slate-900/80 border border-slate-800 text-slate-200 rounded-tl-none space-y-3"
+                        ? "bg-accent text-white rounded-tr-none"
+                        : "bg-surface-dark border border-stroke text-primary rounded-tl-none space-y-2"
                     }`}
                   >
-                    <p>{msg.content}</p>
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
 
-                    {/* Citations List if present */}
+                    {/* Citations */}
                     {msg.citations && msg.citations.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800">
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-stroke">
                         {msg.citations.map((c: any, cIdx: number) => (
                           <button
                             key={cIdx}
                             onClick={() => setSelectedCitation(c as Citation)}
-                            className="inline-flex items-center gap-1 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/40 text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all"
+                            className="inline-flex items-center gap-1 bg-surface hover:bg-surface-elevated text-accent border border-accent/40 text-[10px] font-mono px-2 py-0.5 rounded transition-colors cursor-pointer"
                           >
-                            <FileText className="w-3 h-3 text-indigo-400" />
+                            <FileText className="w-3 h-3" />
                             <span>
                               [^{cIdx + 1}] {c.document_name || "Source"}
-                              {c.page_numbers && c.page_numbers.length > 0
-                                ? `: p.${c.page_numbers.join(", ")}`
-                                : ""}
+                              {c.page_numbers?.length ? `: p.${c.page_numbers.join(",")}` : ""}
                             </span>
                           </button>
                         ))}
@@ -199,30 +251,25 @@ export default function ChatPage() {
                 </div>
               ))}
 
-              {/* Streaming Active Chunk */}
+              {/* Streaming Output */}
               {isStreaming && (
                 <div className="flex gap-3 justify-start">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shrink-0 shadow-md animate-pulse">
-                    <Sparkles className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl rounded-tl-none max-w-2xl text-sm text-slate-200 leading-relaxed space-y-3">
-                    <p>
+                  <div className="bg-surface-dark border border-stroke p-3.5 rounded-lg rounded-tl-none max-w-2xl text-xs text-primary space-y-2">
+                    <p className="whitespace-pre-wrap">
                       {currentStreamContent}
-                      <span className="inline-block w-2 h-4 bg-indigo-400 ml-1 animate-pulse" />
+                      <span className="inline-block w-1.5 h-3.5 bg-accent ml-1 animate-pulse" />
                     </p>
 
                     {currentCitations.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800">
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-stroke">
                         {currentCitations.map((c, cIdx) => (
                           <button
                             key={cIdx}
                             onClick={() => setSelectedCitation(c)}
-                            className="inline-flex items-center gap-1 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/40 text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all"
+                            className="inline-flex items-center gap-1 bg-surface text-accent border border-accent/40 text-[10px] font-mono px-2 py-0.5 rounded cursor-pointer"
                           >
-                            <FileText className="w-3 h-3 text-indigo-400" />
-                            <span>
-                              [^{cIdx + 1}] {c.document_name}
-                            </span>
+                            <FileText className="w-3 h-3" />
+                            <span>[^{cIdx + 1}] {c.document_name}</span>
                           </button>
                         ))}
                       </div>
@@ -236,74 +283,78 @@ export default function ChatPage() {
         </div>
 
         {/* Input Bar */}
-        <form onSubmit={handleSend} className="p-4 bg-slate-900/90 border-t border-slate-800 flex items-center gap-3">
+        <form onSubmit={handleSend} className="p-3 bg-surface-dark border-t border-stroke flex items-center gap-2">
           <input
             type="text"
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder={
               activeWorkspaceId
-                ? "Ask anything about documents in this workspace..."
-                : "Please select a workspace in top header first..."
+                ? "Ask a question about documents in this workspace..."
+                : "Select a workspace above to begin..."
             }
             disabled={!activeWorkspaceId || isStreaming}
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            className="flex-1 bg-surface border border-stroke rounded-md px-3 py-2.5 text-xs text-primary placeholder:text-muted focus:outline-none focus:border-accent"
           />
 
           {isStreaming ? (
             <Button
               type="button"
               variant="danger"
+              size="sm"
               onClick={stopStream}
-              leftIcon={<Square className="w-4 h-4 fill-white" />}
+              leftIcon={<Square className="w-3.5 h-3.5 fill-white" />}
             >
               Stop
             </Button>
           ) : (
             <Button
               type="submit"
+              size="sm"
               disabled={!inputQuery.trim() || !activeWorkspaceId}
-              leftIcon={<Send className="w-4 h-4" />}
+              className="bg-accent hover:bg-accent-hover text-white"
+              leftIcon={<Send className="w-3.5 h-3.5" />}
             >
-              Send Query
+              Send
             </Button>
           )}
         </form>
       </div>
 
-      {/* Citation Detail Modal Drawer */}
+      {/* Citation Inspector Drawer Modal */}
       {selectedCitation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="glass-panel max-w-lg w-full rounded-2xl p-6 border border-slate-800 bg-slate-950 shadow-2xl">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-indigo-400" />
-                <h3 className="text-sm font-bold text-white font-outfit">
-                  {selectedCitation.document_name}
-                </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+          <div className="surface-card max-w-lg w-full p-5 bg-surface border border-stroke rounded-xl space-y-3">
+            <div className="flex items-center justify-between border-b border-stroke pb-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-primary font-heading">
+                <FileText className="w-3.5 h-3.5 text-accent" />
+                <span>Citation Inspector: {selectedCitation.document_name}</span>
               </div>
               <button
                 onClick={() => setSelectedCitation(null)}
-                className="text-slate-400 hover:text-white"
+                className="text-muted hover:text-primary text-xs cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {selectedCitation.page_numbers && selectedCitation.page_numbers.length > 0 && (
-              <Badge variant="purple" size="sm" className="mb-3">
-                Page {selectedCitation.page_numbers.join(", ")}
-              </Badge>
-            )}
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-mono text-muted">
+                {selectedCitation.page_numbers?.length ? `Page ${selectedCitation.page_numbers.join(", ")}` : "Full Document"}
+              </span>
+              <span className="text-success font-mono text-[10px] flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" /> Server-Verified ACL
+              </span>
+            </div>
 
-            <div className="mt-3">
-              <p className="text-xs text-slate-400 mb-1 font-semibold uppercase">Source Excerpt:</p>
-              <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-200 italic leading-relaxed">
+            <div className="space-y-1 text-left">
+              <span className="text-[10px] font-mono text-muted uppercase">Matched Source Text Excerpt:</span>
+              <div className="p-3 rounded bg-surface-dark border border-stroke font-mono text-[11px] text-secondary leading-relaxed">
                 &quot;{selectedCitation.content_excerpt}&quot;
               </div>
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="flex justify-end pt-2 border-t border-stroke">
               <Button size="sm" variant="secondary" onClick={() => setSelectedCitation(null)}>
                 Close Preview
               </Button>

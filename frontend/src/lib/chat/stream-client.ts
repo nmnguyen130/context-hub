@@ -9,6 +9,8 @@ export interface ChatStreamRequestPayload {
   message: string;
   session_id?: string | null;
   model?: string;
+  retrieval_policy?: "balanced" | "fast" | "quality" | string;
+  scope?: "workspace" | "all" | string;
   document_ids?: string[];
 }
 

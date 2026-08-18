@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ContextHub — Theme Preview</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 40px;
+      background: #08090b;
+      color: #e5e7eb;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      color: #8b929e;
+      margin-bottom: 32px;
+      font-size: 14px;
+    }
+
+    .themes {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(320px, 1fr));
+      gap: 20px;
+      overflow-x: auto;
+      padding-bottom: 20px;
+    }
+
+    .theme {
+      --bg: #09090b;
+      --surface: #111214;
+      --surface2: #181a1e;
+      --border: #292c31;
+      --text: #e5e7eb;
+      --muted: #858b95;
+      --primary: #999;
+      --secondary: #666;
+      --success: #3ddc97;
+      --warning: #e5a84b;
+      --danger: #ef6262;
+
+      min-width: 320px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    }
+
+    .theme.recommended {
+      border-color: var(--primary);
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--primary) 25%, transparent),
+        0 24px 80px rgba(0,0,0,.4);
+    }
+
+    .theme-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .number {
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--primary);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+
+    .theme-name {
+      font-size: 17px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    .theme-desc {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .recommended-label {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 4px 7px;
+      border: 1px solid var(--primary);
+      border-radius: 5px;
+      color: var(--primary);
+      font: 10px ui-monospace, monospace;
+      text-transform: uppercase;
+    }
+
+    /* Dashboard */
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 58px 1fr;
+      height: 350px;
+    }
+
+    .sidebar {
+      padding: 14px 9px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+    }
+
+    .logo {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--primary);
+      color: var(--bg);
+      font-size: 11px;
+      font-weight: 800;
+      margin: 0 auto 22px;
+    }
+
+    .nav-dot {
+      width: 27px;
+      height: 27px;
+      margin: 7px auto;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .nav-dot.active {
+      background: var(--surface2);
+      color: var(--primary);
+    }
+
+    .main {
+      background: var(--bg);
+      min-width: 0;
+    }
+
+    .topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .crumb {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+
+    .content {
+      padding: 16px;
+    }
+
+    .page-title {
+      font-size: 16px;
+      font-weight: 650;
+      margin-bottom: 14px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      margin-bottom: 12px;
+    }
+
+    .card {
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+    }
+
+    .card-label {
+      color: var(--muted);
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .card-value {
+      margin-top: 5px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .table {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr .7fr;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 9px;
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .row.header {
+      color: var(--muted);
+      font-size: 8px;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: inline-flex;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 7px;
+      background: color-mix(in srgb, var(--success) 12%, transparent);
+      color: var(--success);
+    }
+
+    .citation {
+      margin-top: 10px;
+      padding: 9px;
+      border-left: 2px solid var(--primary);
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 8px;
+      line-height: 1.5;
+    }
+
+    /* Palette */
+
+    .palette {
+      padding: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .palette-title {
+      color: var(--muted);
+      font: 9px ui-monospace, monospace;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      margin-bottom: 9px;
+    }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+
+    .swatch {
+      height: 32px;
+      border-radius: 5px;
+      border: 1px solid rgba(255,255,255,.08);
+      position: relative;
+    }
+
+    .swatch span {
+      position: absolute;
+      left: 4px;
+      bottom: 3px;
+      font: 6px ui-monospace, monospace;
+      color: rgba(255,255,255,.7);
+    }
+
+    /* Theme 1 */
+
+    .t1 {
+      --bg: #09090b;
+      --surface: #111214;
+      --surface2: #181a1e;
+      --border: #303238;
+      --text: #e4e4e7;
+      --muted: #85858c;
+      --primary: #d2a85a;
+      --secondary: #8f98a5;
+    }
+
+    /* Theme 2 */
+
+    .t2 {
+      --bg: #0b0f17;
+      --surface: #111722;
+      --surface2: #192230;
+      --border: #293646;
+      --text: #e3eaf2;
+      --muted: #7d8b9b;
+      --primary: #6e9fc7;
+      --secondary: #8294a7;
+    }
+
+    /* Theme 3 */
+
+    .t3 {
+      --bg: #000000;
+      --surface: #080808;
+      --surface2: #111111;
+      --border: #292929;
+      --text: #f5f5f5;
+      --muted: #777777;
+      --primary: #ffffff;
+      --secondary: #aaaaaa;
+    }
+
+    /* Theme 4 */
+
+    .t4 {
+      --bg: #0c0d0e;
+      --surface: #121516;
+      --surface2: #191c1d;
+      --border: #29302f;
+      --text: #e4e8e6;
+      --muted: #7c8782;
+      --primary: #42d6a0;
+      --secondary: #d19a45;
+    }
+
+    /* Theme 5 */
+
+    .t5 {
+      --bg: #0b0d10;
+      --surface: #15181d;
+      --surface2: #1b2027;
+      --border: #292e36;
+      --text: #e7ebf0;
+      --muted: #7f8997;
+      --primary: #5b8cff;
+      --secondary: #718096;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        padding: 20px;
+      }
+
+      .themes {
+        grid-template-columns: repeat(5, 320px);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>ContextHub — Enterprise Theme Explorer</h1>
+  <div class="subtitle">
+    Compare the visual direction before committing the design system.
+  </div>
+
+  <div class="themes">
+
+    <!-- 1 -->
+    <section class="theme t1">
+      <div class="theme-header">
+        <div class="number">01 / Recommended Alternative</div>
+        <div class="theme-name">Obsidian Precision</div>
+        <div class="theme-desc">
+          Linear / Raycast style. Deep matte zinc with subtle warm amber accents.
+        </div>
+      </div>
+
+      <div class="dashboard">
+        <aside class="sidebar">
+          <div class="logo">C</div>
+          <div class="nav-dot active">⌂</div>
+          <div class="nav-dot">◫</div>
+          <div class="nav-dot">⌕</div>
+          <div class="nav-dot">◉</div>
+        </aside>
+
+        <main class="main">
+          <div class="topbar">
+            <div class="crumb">Knowledge / Engineering</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="content">
+            <div class="page-title">Knowledge Overview</div>
+
+            <div class="cards">
+              <div class="card">
+                <div class="card-label">Documents</div>
+                <div class="card-value">12,481</div>
+              </div>
+              <div class="card">
+                <div class="card-label">Queries</div>
+                <div class="card-value">8,291</div>
+              </div>
+              <div class="card">
+                <div class="card-label">Accuracy</div>
+                <div class="card-value">96.4%</div>
+              </div>
+            </div>
+
+            <div class="table">
+              <div class="row header">
+                <span>Document</span><span>Owner</span><span>Status</span>
+              </div>
+              <div class="row">
+                <span>Architecture.md</span><span>Engineering</span><span class="status">Indexed</span>
+              </div>
+              <div class="row">
+                <span>Security Policy</span><span>Security</span><span class="status">Indexed</span>
+              </div>
+              <div class="row">
+                <span>API Reference</span><span>Platform</span><span class="status">Indexed</span>
+              </div>
+            </div>
+
+            <div class="citation">
+              [1] Architecture.md · §3.2 · Source verified
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <div class="palette">
+        <div class="palette-title">Palette</div>
+        <div class="swatches">
+          <div class="swatch" style="background:#09090b"><span>#09090B</span></div>
+          <div class="swatch" style="background:#111214"><span>#111214</span></div>
+          <div class="swatch" style="background:#303238"><span>#303238</span></div>
+          <div class="swatch" style="background:#d2a85a"><span>#D2A85A</span></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 2 -->
+    <section class="theme t2">
+      <div class="theme-header">
+        <div class="number">02</div>
+        <div class="theme-name">Enterprise Graphite & Steel</div>
+        <div class="theme-desc">
+          Stripe / Palantir style. Navy-slate foundation with structured steel blue.
+        </div>
+      </div>
+
+      <div class="dashboard">
+        <aside class="sidebar">
+          <div class="logo">C</div>
+          <div class="nav-dot active">⌂</div>
+          <div class="nav-dot">◫</div>
+          <div class="nav-dot">⌕</div>
+          <div class="nav-dot">◉</div>
+        </aside>
+
+        <main class="main">
+          <div class="topbar">
+            <div class="crumb">Knowledge / Engineering</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="content">
+            <div class="page-title">Knowledge Overview</div>
+
+            <div class="cards">
+              <div class="card"><div class="card-label">Documents</div><div class="card-value">12,481</div></div>
+              <div class="card"><div class="card-label">Queries</div><div class="card-value">8,291</div></div>
+              <div class="card"><div class="card-label">Accuracy</div><div class="card-value">96.4%</div></div>
+            </div>
+
+            <div class="table">
+              <div class="row header"><span>Document</span><span>Owner</span><span>Status</span></div>
+              <div class="row"><span>Architecture.md</span><span>Engineering</span><span class="status">Indexed</span></div>
+              <div class="row"><span>Security Policy</span><span>Security</span><span class="status">Indexed</span></div>
+              <div class="row"><span>API Reference</span><span>Platform</span><span class="status">Indexed</span></div>
+            </div>
+
+            <div class="citation">[1] Architecture.md · §3.2 · Source verified</div>
+          </div>
+        </main>
+      </div>
+
+      <div class="palette">
+        <div class="palette-title">Palette</div>
+        <div class="swatches">
+          <div class="swatch" style="background:#0b0f17"><span>#0B0F17</span></div>
+          <div class="swatch" style="background:#111722"><span>#111722</span></div>
+          <div class="swatch" style="background:#293646"><span>#293646</span></div>
+          <div class="swatch" style="background:#6e9fc7"><span>#6E9FC7</span></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 3 -->
+    <section class="theme t3">
+      <div class="theme-header">
+        <div class="number">03</div>
+        <div class="theme-name">Minimalist Monochromatic</div>
+        <div class="theme-desc">
+          Vercel / Geist style. Pure black, white typography and technical grid lines.
+        </div>
+      </div>
+
+      <div class="dashboard">
+        <aside class="sidebar">
+          <div class="logo">C</div>
+          <div class="nav-dot active">⌂</div>
+          <div class="nav-dot">◫</div>
+          <div class="nav-dot">⌕</div>
+          <div class="nav-dot">◉</div>
+        </aside>
+
+        <main class="main">
+          <div class="topbar">
+            <div class="crumb">Knowledge / Engineering</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="content">
+            <div class="page-title">Knowledge Overview</div>
+
+            <div class="cards">
+              <div class="card"><div class="card-label">Documents</div><div class="card-value">12,481</div></div>
+              <div class="card"><div class="card-label">Queries</div><div class="card-value">8,291</div></div>
+              <div class="card"><div class="card-label">Accuracy</div><div class="card-value">96.4%</div></div>
+            </div>
+
+            <div class="table">
+              <div class="row header"><span>Document</span><span>Owner</span><span>Status</span></div>
+              <div class="row"><span>Architecture.md</span><span>Engineering</span><span class="status">Indexed</span></div>
+              <div class="row"><span>Security Policy</span><span>Security</span><span class="status">Indexed</span></div>
+              <div class="row"><span>API Reference</span><span>Platform</span><span class="status">Indexed</span></div>
+            </div>
+
+            <div class="citation">[1] Architecture.md · §3.2 · Source verified</div>
+          </div>
+        </main>
+      </div>
+
+      <div class="palette">
+        <div class="palette-title">Palette</div>
+        <div class="swatches">
+          <div class="swatch" style="background:#000"><span>#000000</span></div>
+          <div class="swatch" style="background:#080808"><span>#080808</span></div>
+          <div class="swatch" style="background:#292929"><span>#292929</span></div>
+          <div class="swatch" style="background:#fff"><span>#FFFFFF</span></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 4 -->
+    <section class="theme t4">
+      <div class="theme-header">
+        <div class="number">04</div>
+        <div class="theme-name">Craft Charcoal & Phosphor</div>
+        <div class="theme-desc">
+          Supabase / Resend style. Warm charcoal with emerald and amber indicators.
+        </div>
+      </div>
+
+      <div class="dashboard">
+        <aside class="sidebar">
+          <div class="logo">C</div>
+          <div class="nav-dot active">⌂</div>
+          <div class="nav-dot">◫</div>
+          <div class="nav-dot">⌕</div>
+          <div class="nav-dot">◉</div>
+        </aside>
+
+        <main class="main">
+          <div class="topbar">
+            <div class="crumb">Knowledge / Engineering</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="content">
+            <div class="page-title">Knowledge Overview</div>
+
+            <div class="cards">
+              <div class="card"><div class="card-label">Documents</div><div class="card-value">12,481</div></div>
+              <div class="card"><div class="card-label">Queries</div><div class="card-value">8,291</div></div>
+              <div class="card"><div class="card-label">Accuracy</div><div class="card-value">96.4%</div></div>
+            </div>
+
+            <div class="table">
+              <div class="row header"><span>Document</span><span>Owner</span><span>Status</span></div>
+              <div class="row"><span>Architecture.md</span><span>Engineering</span><span class="status">Indexed</span></div>
+              <div class="row"><span>Security Policy</span><span>Security</span><span class="status">Indexed</span></div>
+              <div class="row"><span>API Reference</span><span>Platform</span><span class="status">Indexed</span></div>
+            </div>
+
+            <div class="citation">[1] Architecture.md · §3.2 · Source verified</div>
+          </div>
+        </main>
+      </div>
+
+      <div class="palette">
+        <div class="palette-title">Palette</div>
+        <div class="swatches">
+          <div class="swatch" style="background:#0c0d0e"><span>#0C0D0E</span></div>
+          <div class="swatch" style="background:#121516"><span>#121516</span></div>
+          <div class="swatch" style="background:#29302f"><span>#29302F</span></div>
+          <div class="swatch" style="background:#42d6a0"><span>#42D6A0</span></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 5 -->
+    <section class="theme t5 recommended">
+      <div class="theme-header">
+        <div class="number">05 / My Pick</div>
+        <div class="theme-name">Precision Graphite & Electric Blue</div>
+        <div class="theme-desc">
+          Linear × Vercel × Palantir. Serious enterprise foundation with restrained blue intelligence accents.
+        </div>
+        <div class="recommended-label">Recommended</div>
+      </div>
+
+      <div class="dashboard">
+        <aside class="sidebar">
+          <div class="logo">C</div>
+          <div class="nav-dot active">⌂</div>
+          <div class="nav-dot">◫</div>
+          <div class="nav-dot">⌕</div>
+          <div class="nav-dot">◉</div>
+        </aside>
+
+        <main class="main">
+          <div class="topbar">
+            <div class="crumb">Knowledge / Engineering</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="content">
+            <div class="page-title">Knowledge Overview</div>
+
+            <div class="cards">
+              <div class="card"><div class="card-label">Documents</div><div class="card-value">12,481</div></div>
+              <div class="card"><div class="card-label">Queries</div><div class="card-value">8,291</div></div>
+              <div class="card"><div class="card-label">Accuracy</div><div class="card-value">96.4%</div></div>
+            </div>
+
+            <div class="table">
+              <div class="row header"><span>Document</span><span>Owner</span><span>Status</span></div>
+              <div class="row"><span>Architecture.md</span><span>Engineering</span><span class="status">Indexed</span></div>
+              <div class="row"><span>Security Policy</span><span>Security</span><span class="status">Indexed</span></div>
+              <div class="row"><span>API Reference</span><span>Platform</span><span class="status">Indexed</span></div>
+            </div>
+
+            <div class="citation">[1] Architecture.md · §3.2 · Source verified</div>
+          </div>
+        </main>
+      </div>
+
+      <div class="palette">
+        <div class="palette-title">Palette</div>
+        <div class="swatches">
+          <div class="swatch" style="background:#0b0d10"><span>#0B0D10</span></div>
+          <div class="swatch" style="background:#15181d"><span>#15181D</span></div>
+          <div class="swatch" style="background:#292e36"><span>#292E36</span></div>
+          <div class="swatch" style="background:#5b8cff"><span>#5B8CFF</span></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+</body>
+</html>

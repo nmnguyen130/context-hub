@@ -17,18 +17,18 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const inputId = id || (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
 
     return (
-      <div className="w-full space-y-1.5">
+      <div className="w-full space-y-1.5 text-left">
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-xs font-medium text-slate-300 uppercase tracking-wider"
+            className="block text-xs font-medium text-primary tracking-tight"
           >
             {label}
           </label>
         )}
         <div className="relative flex items-center">
           {leftIcon && (
-            <div className="absolute left-3 text-slate-400 pointer-events-none">
+            <div className="absolute left-3 text-muted pointer-events-none flex items-center justify-center">
               {leftIcon}
             </div>
           )}
@@ -36,22 +36,22 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={clsx(
-              "w-full bg-slate-900/80 border text-slate-100 placeholder-slate-500 text-sm rounded-lg px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500",
-              leftIcon && "pl-10",
-              rightIcon && "pr-10",
+              "w-full bg-surface-elevated border text-primary placeholder:text-muted text-xs sm:text-sm rounded-lg px-3 py-2 transition-all focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/40 disabled:opacity-50 disabled:cursor-not-allowed",
+              leftIcon && "pl-9",
+              rightIcon && "pr-9",
               error
-                ? "border-rose-500/80 focus:border-rose-500 focus:ring-rose-500/40"
-                : "border-slate-800 hover:border-slate-700",
+                ? "border-danger focus:border-danger focus:ring-danger/30"
+                : "border-stroke hover:border-stroke-strong",
               className
             )}
             {...props}
           />
           {rightIcon && (
-            <div className="absolute right-3 text-slate-400">{rightIcon}</div>
+            <div className="absolute right-3 text-muted">{rightIcon}</div>
           )}
         </div>
-        {error && <p className="text-xs text-rose-400 mt-1">{error}</p>}
-        {hint && !error && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
+        {error && <p className="text-[11px] text-danger mt-1">{error}</p>}
+        {hint && !error && <p className="text-[11px] text-muted mt-1">{hint}</p>}
       </div>
     );
   }

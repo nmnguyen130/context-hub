@@ -1,37 +1,52 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { Terminal } from "lucide-react";
 
 export function LandingFooter() {
   return (
-    <footer className="border-t border-slate-800/80 bg-slate-950 py-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-400 p-0.5">
-            <div className="w-full h-full bg-slate-950 rounded-[6px] flex items-center justify-center">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+    <footer className="bg-canvas border-t border-stroke py-12 text-xs text-muted">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-8 border-b border-stroke">
+          {/* Logo & Platform Tag */}
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 rounded bg-surface border border-stroke flex items-center justify-center text-accent">
+              <Terminal className="w-3 h-3" />
             </div>
+            <span className="font-bold text-sm text-primary tracking-tight font-heading">
+              Context<span className="text-accent">Hub</span>
+            </span>
+            <span className="text-[10px] font-mono text-muted bg-surface px-2 py-0.5 rounded border border-stroke ml-2">
+              Enterprise AI Knowledge Platform
+            </span>
           </div>
-          <span className="font-bold text-base text-white font-outfit">
-            Context<span className="text-gradient">Hub</span>
-          </span>
-          <span className="text-xs text-slate-500 ml-3">
-            © {new Date().getFullYear()} ContextHub Inc. All rights reserved.
-          </span>
+
+          {/* Nav Links */}
+          <div className="flex flex-wrap items-center gap-6 text-xs">
+            <a href="#pipeline" className="hover:text-primary transition-colors">
+              Pipeline
+            </a>
+            <a href="#tour" className="hover:text-primary transition-colors">
+              Demo
+            </a>
+            <a href="#capabilities" className="hover:text-primary transition-colors">
+              Capabilities
+            </a>
+            <a href="#security" className="hover:text-primary transition-colors">
+              Security
+            </a>
+            <a href="#pricing" className="hover:text-primary transition-colors">
+              Pricing
+            </a>
+            <Link href="/login" className="hover:text-primary transition-colors">
+              Sign In
+            </Link>
+          </div>
         </div>
 
-        <div className="flex items-center gap-6 text-xs text-slate-400 font-medium">
-          <Link href="#features" className="hover:text-white transition-colors">
-            Features
-          </Link>
-          <Link href="#pricing" className="hover:text-white transition-colors">
-            Pricing
-          </Link>
-          <Link href="/login" className="hover:text-white transition-colors">
-            Sign In
-          </Link>
-          <Link href="/register" className="hover:text-white transition-colors">
-            Register Tenant
-          </Link>
+        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px]">
+          <p>© {new Date().getFullYear()} ContextHub Platform. All rights reserved.</p>
+          <p className="font-mono text-secondary">
+            Architecture: FastAPI · SQLAlchemy UoW · PostgreSQL pgvector · Next.js 16
+          </p>
         </div>
       </div>
     </footer>

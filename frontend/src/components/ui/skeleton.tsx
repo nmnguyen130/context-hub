@@ -7,7 +7,7 @@ export function Skeleton({
   return (
     <div
       className={clsx(
-        "animate-pulse rounded-md bg-slate-800/80 border border-slate-700/40",
+        "animate-pulse rounded-md bg-surface-elevated border border-stroke/50",
         className
       )}
       {...props}

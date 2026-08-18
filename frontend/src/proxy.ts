@@ -21,7 +21,13 @@ export function proxy(request: NextRequest) {
   }
 
   // 2. Redirect authenticated users away from auth pages to /dashboard
-  if (pathname === "/login" || pathname === "/register") {
+  if (
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/accept-invite"
+  ) {
     if (hasSession) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
@@ -51,6 +57,9 @@ export const config = {
     "/settings/:path*",
     "/login",
     "/register",
+    "/forgot-password",
+    "/reset-password",
+    "/accept-invite",
     "/api/v1/:path*",
   ],
 };

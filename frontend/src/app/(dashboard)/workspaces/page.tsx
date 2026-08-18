@@ -1,40 +1,27 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   FolderKanban,
   Plus,
-  Upload,
-  FileText,
-  Trash2,
-  Globe,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
+  ArrowRight,
+  Search,
+  Shield,
 } from "lucide-react";
 import { useWorkspaces, useCreateWorkspace } from "@/features/workspace/hooks/use-workspaces";
-import { useDocuments, useUploadDocument, useDeleteDocument } from "@/features/documents/hooks/use-documents";
-import { useWorkspaceStore } from "@/store/workspace-store";
 import { workspaceSchema, WorkspaceFormValues } from "@/features/workspace/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { PermissionGuard } from "@/features/auth/permission-guard";
 
-export default function WorkspacesPage() {
+export default function WorkspacesDirectoryPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const { data: workspacesData, isLoading: loadingWorkspaces } = useWorkspaces();
-  const { activeWorkspaceId, setActiveWorkspaceId } = useWorkspaceStore();
-  const { data: documentsData, isLoading: loadingDocs } = useDocuments(activeWorkspaceId);
-
+  const [searchQuery, setSearchQuery] = useState("");
+  const { data: workspacesData, isLoading } = useWorkspaces();
   const createWorkspaceMutation = useCreateWorkspace();
-  const uploadDocMutation = useUploadDocument(activeWorkspaceId);
-  const deleteDocMutation = useDeleteDocument(activeWorkspaceId);
 
   const {
     register,
@@ -56,24 +43,22 @@ export default function WorkspacesPage() {
     setShowCreateModal(false);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await uploadDocMutation.mutateAsync(file);
-    e.target.value = "";
-  };
-
   const workspaces = workspacesData?.items || [];
-  const documents = documentsData?.items || [];
+  const filteredWorkspaces = workspaces.filter((ws) =>
+    ws.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (ws.description && ws.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-stroke">
         <div>
-          <h1 className="text-2xl font-bold text-white font-outfit">Workspaces & Knowledge Base</h1>
-          <p className="text-slate-400 text-xs mt-1">
-            Organize documents into dedicated workspaces for grounded RAG ingestion.
+          <h1 className="text-xl sm:text-2xl font-bold text-primary tracking-tight font-heading">
+            Workspaces Directory
+          </h1>
+          <p className="text-xs text-muted mt-0.5">
+            Organize institutional knowledge into isolated collections with granular workspace-level access control.
           </p>
         </div>
 
@@ -81,194 +66,111 @@ export default function WorkspacesPage() {
           <Button
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => setShowCreateModal(true)}
+            className="bg-accent hover:bg-accent-hover text-white"
           >
             Create Workspace
           </Button>
         </PermissionGuard>
       </div>
 
-      {/* Workspaces Selector Grid */}
-      <div>
-        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Select Workspace
-        </h2>
+      {/* Search & Stats Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="relative w-full sm:w-80">
+          <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-3" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search workspaces..."
+            className="w-full pl-9 pr-3 py-2 rounded-md bg-surface border border-stroke text-xs text-primary placeholder:text-muted focus:outline-none focus:border-accent"
+          />
+        </div>
 
-        {loadingWorkspaces ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-          </div>
-        ) : workspaces.length === 0 ? (
-          <div className="glass-panel p-8 rounded-xl text-center border border-slate-800">
-            <FolderKanban className="w-10 h-10 text-slate-500 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-slate-300">No Workspaces Found</p>
-            <p className="text-xs text-slate-500 mt-1">Create your first workspace to begin uploading documents.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {workspaces.map((ws) => {
-              const isSelected = activeWorkspaceId === ws.id;
-
-              return (
-                <div
-                  key={ws.id}
-                  onClick={() => setActiveWorkspaceId(ws.id)}
-                  className={`glass-card p-4 rounded-xl cursor-pointer transition-all border ${
-                    isSelected
-                      ? "border-indigo-500 bg-indigo-950/30 ring-1 ring-indigo-500/50 shadow-lg shadow-indigo-500/10"
-                      : "border-slate-800 hover:border-slate-700"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FolderKanban
-                        className={`w-4 h-4 ${isSelected ? "text-indigo-400" : "text-slate-400"}`}
-                      />
-                      <h3 className="text-sm font-bold text-white truncate">{ws.name}</h3>
-                    </div>
-                    <span title="Active Workspace">
-                      <Globe className="w-3.5 h-3.5 text-slate-500" />
-                    </span>
-                  </div>
-                  {ws.description && (
-                    <p className="text-xs text-slate-400 mt-2 line-clamp-1">{ws.description}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div className="text-xs font-mono text-muted self-end sm:self-center">
+          Showing {filteredWorkspaces.length} of {workspaces.length} workspaces
+        </div>
       </div>
 
-      {/* Document Upload & File List Section */}
-      {activeWorkspaceId ? (
-        <div className="space-y-6">
-          {/* File Upload Box */}
-          <Card className="glass-panel p-6 border-dashed border-2 border-slate-700 hover:border-indigo-500/60 transition-colors">
-            <div className="flex flex-col items-center justify-center text-center">
-              <div className="w-12 h-12 rounded-xl bg-indigo-950/80 text-indigo-400 border border-indigo-500/30 flex items-center justify-center mb-3">
-                <Upload className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-100">
-                Upload Document to Active Workspace
-              </h3>
-              <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                Supports <span className="text-slate-200 font-semibold">PDF, Markdown (.md), Text (.txt)</span> files up to 50MB.
-              </p>
-
-              <label className="mt-4 cursor-pointer">
-                <input
-                  type="file"
-                  accept=".pdf,.md,.txt,.docx"
-                  onChange={handleFileUpload}
-                  disabled={uploadDocMutation.isPending}
-                  className="hidden"
-                />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  isLoading={uploadDocMutation.isPending}
-                  leftIcon={<Upload className="w-4 h-4" />}
-                >
-                  Select File from Computer
-                </Button>
-              </label>
-            </div>
-          </Card>
-
-          {/* Document Table */}
-          <div>
-            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Ingested Documents ({documents.length})
-            </h2>
-
-            {loadingDocs ? (
-              <div className="space-y-2">
-                <Skeleton className="h-14" />
-                <Skeleton className="h-14" />
-              </div>
-            ) : documents.length === 0 ? (
-              <div className="glass-panel p-8 rounded-xl text-center border border-slate-800 text-slate-400 text-xs">
-                No documents uploaded to this workspace yet.
-              </div>
-            ) : (
-              <div className="glass-panel rounded-xl border border-slate-800 overflow-hidden">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/90 text-slate-400 border-b border-slate-800 font-semibold uppercase tracking-wider">
-                    <tr>
-                      <th className="px-4 py-3">Document Name</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Type</th>
-                      <th className="px-4 py-3">Size</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80">
-                    {documents.map((doc) => (
-                      <tr key={doc.id} className="hover:bg-slate-900/40 transition-colors">
-                        <td className="px-4 py-3 flex items-center gap-2.5 font-medium text-slate-200">
-                          <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                          <span className="truncate max-w-xs">{doc.filename}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {doc.status === "ACTIVE" && (
-                            <Badge variant="success" size="sm">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>ACTIVE</span>
-                            </Badge>
-                          )}
-                          {(doc.status === "PENDING" || doc.status === "PROCESSING") && (
-                            <Badge variant="warning" size="sm">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>{doc.status}</span>
-                            </Badge>
-                          )}
-                          {doc.status === "ERROR" && (
-                            <Badge variant="error" size="sm">
-                              <AlertCircle className="w-3 h-3" />
-                              <span>ERROR</span>
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-slate-400 uppercase">{doc.mime_type || "bin"}</td>
-                        <td className="px-4 py-3 text-slate-400">
-                          {(doc.file_size / 1024).toFixed(1)} KB
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <PermissionGuard allowed={["ADMIN", "OWNER"]}>
-                            <button
-                              onClick={() => deleteDocMutation.mutate(doc.id)}
-                              disabled={deleteDocMutation.isPending}
-                              className="p-1.5 rounded bg-slate-900 hover:bg-rose-950/80 hover:text-rose-400 text-slate-400 border border-slate-800 transition-colors"
-                              title="Delete Document"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </PermissionGuard>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+      {/* Workspaces Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="h-40 rounded-lg bg-surface border border-stroke animate-pulse"></div>
+          <div className="h-40 rounded-lg bg-surface border border-stroke animate-pulse"></div>
+          <div className="h-40 rounded-lg bg-surface border border-stroke animate-pulse"></div>
+        </div>
+      ) : filteredWorkspaces.length === 0 ? (
+        <div className="p-12 rounded-lg bg-surface border border-stroke text-center space-y-3">
+          <FolderKanban className="w-8 h-8 text-muted mx-auto opacity-50" />
+          <h3 className="text-sm font-bold text-primary font-heading">No Workspaces Found</h3>
+          <p className="text-xs text-muted max-w-sm mx-auto">
+            {searchQuery
+              ? `No workspaces matching "${searchQuery}".`
+              : "Create your first workspace to start ingesting documents and managing team ACLs."}
+          </p>
+          <PermissionGuard allowed={["ADMIN", "OWNER"]}>
+            <Button
+              size="sm"
+              onClick={() => setShowCreateModal(true)}
+              leftIcon={<Plus className="w-3.5 h-3.5" />}
+              className="bg-accent hover:bg-accent-hover text-white mt-2"
+            >
+              Create First Workspace
+            </Button>
+          </PermissionGuard>
         </div>
       ) : (
-        <div className="glass-panel p-12 rounded-xl text-center border border-slate-800 text-slate-400">
-          <Clock className="w-8 h-8 mx-auto mb-2 text-slate-500" />
-          <p className="text-sm font-medium">Please select a workspace above to view and upload documents.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredWorkspaces.map((ws) => (
+            <Link
+              key={ws.id}
+              href={`/workspaces/${ws.id}`}
+              className="p-5 rounded-lg bg-surface border border-stroke hover:border-accent/50 transition-all flex flex-col justify-between group"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="w-8 h-8 rounded-md bg-surface-elevated border border-stroke flex items-center justify-center text-accent group-hover:border-accent/40 transition-colors">
+                    <FolderKanban className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-mono text-muted bg-surface-elevated px-2 py-0.5 rounded border border-stroke flex items-center gap-1">
+                    <Shield className="w-3 h-3 text-success" />
+                    <span>ACL Scoped</span>
+                  </span>
+                </div>
+
+                <h3 className="text-sm font-bold text-primary group-hover:text-accent transition-colors truncate font-heading">
+                  {ws.name}
+                </h3>
+                <p className="text-xs text-muted mt-1 line-clamp-2 leading-relaxed">
+                  {ws.description || "No description provided for this knowledge space."}
+                </p>
+              </div>
+
+              <div className="mt-5 pt-3 border-t border-stroke flex items-center justify-between text-xs text-muted">
+                <span className="text-[11px] font-mono">Workspace Console</span>
+                <span className="text-accent flex items-center gap-1 group-hover:translate-x-0.5 transition-transform text-xs font-semibold">
+                  Open <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+              </div>
+            </Link>
+          ))}
         </div>
       )}
 
       {/* Create Workspace Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border border-slate-800 shadow-2xl bg-slate-950">
-            <h3 className="text-lg font-bold text-white font-outfit mb-4">Create New Workspace</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+          <div className="surface-card max-w-md w-full p-6 bg-surface border border-stroke rounded-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-stroke pb-2">
+              <h3 className="text-sm font-bold text-primary font-heading">Create New Workspace</h3>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="text-muted hover:text-primary text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
 
-            <form onSubmit={handleSubmit(onCreateWorkspace)} className="space-y-4">
+            <form onSubmit={handleSubmit(onCreateWorkspace)} className="space-y-3">
               <Input
                 label="Workspace Name"
                 placeholder="Engineering Specs"
@@ -278,22 +180,25 @@ export default function WorkspacesPage() {
 
               <Input
                 label="Description (Optional)"
-                placeholder="Repository of engineering design specs and architecture notes"
+                placeholder="Central repository of engineering architectural designs and specs"
                 error={errors.description?.message}
                 {...register("description")}
               />
 
-              <div className="flex items-center justify-end gap-3 mt-6">
+              <div className="flex justify-end gap-2 pt-2">
                 <Button
                   type="button"
                   variant="ghost"
+                  size="sm"
                   onClick={() => setShowCreateModal(false)}
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
+                  size="sm"
                   isLoading={createWorkspaceMutation.isPending}
+                  className="bg-accent hover:bg-accent-hover text-white"
                 >
                   Create Workspace
                 </Button>

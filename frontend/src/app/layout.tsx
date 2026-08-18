@@ -35,7 +35,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body
-        className="antialiased min-h-screen bg-[#090d16] text-slate-100 selection:bg-indigo-500/30 selection:text-indigo-200"
+        className="antialiased min-h-screen bg-canvas text-primary font-sans selection:bg-accent/20 selection:text-accent"
         suppressHydrationWarning
       >
         <Script
@@ -70,9 +70,9 @@ export default function RootLayout({
             position="bottom-right"
             toastOptions={{
               style: {
-                background: "#111827",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                color: "#f3f4f6",
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-stroke)",
+                color: "var(--color-primary)",
               },
             }}
           />

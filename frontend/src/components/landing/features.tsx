@@ -1,74 +1,95 @@
 "use client";
 
-import { Shield, Cpu, Layers, Workflow, Search, Terminal } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { ShieldCheck, Search, FileCheck2, Cpu, Lock, Workflow } from "lucide-react";
 
 export function LandingFeatures() {
-  const features = [
+  const capabilities = [
     {
-      icon: <Layers className="w-6 h-6 text-indigo-400" />,
+      icon: ShieldCheck,
       title: "Logical Multi-Tenancy",
+      tag: "Core Foundation",
       description:
-        "Guaranteed data isolation across organizations using mandatory tenant_id context constraints and indexed PostgreSQL partitioning.",
+        "Every database query and vector lookup is strictly filtered by tenant_id context, ensuring complete organizational data isolation.",
     },
     {
-      icon: <Search className="w-6 h-6 text-cyan-400" />,
-      title: "Hybrid RAG Engine",
+      icon: Search,
+      title: "Hybrid Search (Dense + Sparse)",
+      tag: "Retrieval Engine",
       description:
-        "Combines dense pgvector cosine similarity with sparse tsvector full-text search. Reciprocal Rank Fusion (RRF) delivers top context accuracy.",
+        "Merges pgvector cosine distance (semantic intent) with PostgreSQL tsvector full-text search using Reciprocal Rank Fusion (RRF).",
     },
     {
-      icon: <Cpu className="w-6 h-6 text-purple-400" />,
-      title: "Cohere & Gemini Rerankers",
+      icon: FileCheck2,
+      title: "Verifiable Source Citations",
+      tag: "Strict Grounding",
       description:
-        "Reorders candidate search chunks dynamically to ensure LLMs receive hyper-relevant context windows without hallucination.",
+        "Outputs referenced source metadata with document names, page numbers, and exact matched text excerpts for transparent answers.",
     },
     {
-      icon: <Shield className="w-6 h-6 text-emerald-400" />,
-      title: "Verifiable Inline Citations",
+      icon: Cpu,
+      title: "Asynchronous Worker Pipelines",
+      tag: "Scalable Ingestion",
       description:
-        "Every generated answer includes clickable citation badges linking directly to page numbers, document names, and source excerpts.",
+        "Decoupled Celery workers process PDF, DOCX, Markdown, and text archives asynchronously using semantic paragraph splitting.",
     },
     {
-      icon: <Workflow className="w-6 h-6 text-amber-400" />,
-      title: "Background Celery Worker",
+      icon: Lock,
+      title: "DLP & PII Pre-Ingest Scanner",
+      tag: "Governance Layer",
       description:
-        "Asynchronous document ingestion pipeline handles PDFs, Markdown, and text files using custom semantic chunkers.",
+        "Pre-ingestion scanning filters designed to detect and automatically mask sensitive credentials, SSNs, and credit cards before vector storage.",
     },
     {
-      icon: <Terminal className="w-6 h-6 text-rose-400" />,
-      title: "Enterprise Audit Trail",
+      icon: Workflow,
+      title: "AI Agents & Tool Execution",
+      tag: "Workflow Automation",
       description:
-        "Tracks all mutating actions, authentication events, and document updates in immutable system audit logs.",
+        "Architecture supports ReAct agent loops, custom tool bindings, and human-in-the-loop approval gates for automated task workflows.",
     },
   ];
 
   return (
-    <section id="features" className="py-20 relative bg-slate-950/40">
+    <section id="capabilities" className="py-20 border-b border-stroke bg-canvas">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-bold text-white font-outfit tracking-tight">
-            Engineered for <span className="text-gradient">Enterprise Intelligence</span>
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <div className="text-[11px] font-mono text-accent uppercase tracking-wider mb-1">
+            System Architecture
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-primary tracking-tight font-heading">
+            Core Platform Capabilities
           </h2>
-          <p className="text-slate-400 text-sm mt-3 max-w-2xl mx-auto">
-            Everything your team needs to retrieve, organize, and automate internal knowledge securely.
+          <p className="text-xs text-muted mt-2">
+            Engineered with strict tenant isolation, custom hybrid RAG algorithms, and enterprise security controls.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map((item, idx) => (
-            <Card key={idx} className="glass-card hover:translate-y-[-2px]">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center mb-4">
-                  {item.icon}
+        {/* 6 Capabilities Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {capabilities.map((item, idx) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={idx}
+                className="p-5 rounded-lg bg-surface border border-stroke hover:border-stroke-strong transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-8 h-8 rounded-md bg-surface-elevated border border-stroke flex items-center justify-center text-accent">
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span className="text-[10px] font-mono text-muted bg-surface-elevated px-2 py-0.5 rounded border border-stroke">
+                      {item.tag}
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm font-bold text-primary mb-2 font-heading">{item.title}</h3>
+                  <p className="text-xs text-muted leading-relaxed">
+                    {item.description}
+                  </p>
                 </div>
-                <CardTitle className="text-base font-semibold">{item.title}</CardTitle>
-                <CardDescription className="mt-2 text-xs leading-relaxed">
-                  {item.description}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>

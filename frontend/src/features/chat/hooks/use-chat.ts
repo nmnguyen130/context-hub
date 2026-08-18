@@ -61,13 +61,23 @@ export function useSendChatMessage() {
   const sendMessage = async (
     sessionId: string | null,
     workspaceId: string,
-    query: string
+    query: string,
+    options?: {
+      retrieval_policy?: string;
+      scope?: string;
+    }
   ) => {
     resetStreamState();
     setIsStreaming(true);
 
     await streamClientRef.current?.stream(
-      { session_id: sessionId, workspace_id: workspaceId, message: query },
+      {
+        session_id: sessionId,
+        workspace_id: workspaceId,
+        message: query,
+        retrieval_policy: options?.retrieval_policy,
+        scope: options?.scope,
+      },
       {
         onSession: (sessionData) => {
           if (sessionData.session_id) {
